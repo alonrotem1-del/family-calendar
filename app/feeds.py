@@ -12,7 +12,7 @@ import icalendar
 import recurring_ical_events
 import x_wr_timezone
 
-from .config import CalendarSource
+from .config import Activity, Person
 
 Fetcher = Callable[[str], Awaitable[bytes]]
 
@@ -116,7 +116,7 @@ def _end_of(component, start: date | datetime) -> date | datetime:
 
 def events_between(
     calendar: icalendar.Calendar,
-    source: CalendarSource,
+    person: Person,
     start: date,
     end: date,
     tz: ZoneInfo,
@@ -132,7 +132,7 @@ def events_between(
         dtend = _end_of(component, dtstart)
         all_day = not isinstance(dtstart, datetime)
 
-        hidden = source.private or str(component.get("CLASS", "")).upper() in {
+        hidden = person.private or str(component.get("CLASS", "")).upper() in {
             "PRIVATE",
             "CONFIDENTIAL",
         }
@@ -150,8 +150,8 @@ def events_between(
 
         events.append(
             {
-                "id": f"{source.id}:{component.get('UID', '')}:{start_value}",
-                "calendar": source.id,
+                "id": f"{person.id}:{component.get('UID', '')}:{start_value}",
+                "person": person.id,
                 "title": title or "(ללא כותרת)",
                 "start": start_value,
                 "end": end_value,
@@ -160,6 +160,38 @@ def events_between(
             }
         )
     return events
+
+
+def activities_between(person: Person, start: date, end: date, tz: ZoneInfo) -> list[dict]:
+    """The weekly activities written in family.yaml, for every day in [start, end)."""
+    events = []
+    day = start
+    while day < end:
+        for index, activity in enumerate(person.activities):
+            if not _activity_on(activity, day):
+                continue
+            events.append(
+                {
+                    "id": f"{person.id}:activity{index}:{day.isoformat()}",
+                    "person": person.id,
+                    "title": activity.title,
+                    "start": datetime.combine(day, activity.start, tzinfo=tz).isoformat(),
+                    "end": datetime.combine(day, activity.end, tzinfo=tz).isoformat(),
+                    "allDay": False,
+                    "location": activity.location,
+                }
+            )
+        day += timedelta(days=1)
+    return events
+
+
+def _activity_on(activity: Activity, day: date) -> bool:
+    return (
+        day.weekday() in activity.weekdays
+        and (activity.first is None or day >= activity.first)
+        and (activity.last is None or day <= activity.last)
+        and day not in activity.skip
+    )
 
 
 def sort_key(event: dict) -> tuple:

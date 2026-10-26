@@ -1,40 +1,55 @@
-"""Settings read from environment variables.
+"""Who is in the family, and where each person's events come from.
 
-Each calendar is a numbered group of variables, so they can be added one by one
-in Render's dashboard without editing any file:
-
-    CAL_1_NAME=אבא
-    CAL_1_URL=https://outlook.office365.com/owa/calendar/.../calendar.ics
-    CAL_1_COLOR=#2563eb      (optional)
-    CAL_1_PRIVATE=1          (optional: show "תפוס" instead of titles)
+The family itself (names, colors, kids' activities) lives in `family.yaml`.
+Secret feed links never go in that file: a person with id `aba` reads theirs
+from the environment variable FEED_ABA, set in Render's dashboard.
 """
 
 import hashlib
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
+from datetime import date, time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-MAX_CALENDARS = 20
+import yaml
 
-DEFAULT_COLORS = [
-    "#2563eb",  # blue
-    "#db2777",  # pink
-    "#16a34a",  # green
-    "#ea580c",  # orange
-    "#7c3aed",  # violet
-    "#0891b2",  # cyan
-    "#ca8a04",  # amber
-    "#dc2626",  # red
-]
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_FAMILY_FILE = ROOT / "family.yaml"
+
+DEFAULT_COLORS = ["#2563eb", "#db2777", "#16a34a", "#ea580c", "#7c3aed", "#0891b2", "#ca8a04"]
+
+# Python's weekday(): Monday is 0.
+HEBREW_DAYS = {"שני": 0, "שלישי": 1, "רביעי": 2, "חמישי": 3, "שישי": 4, "שבת": 5, "ראשון": 6}
+
+
+class ConfigError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
-class CalendarSource:
+class Activity:
+    """A weekly recurring activity, e.g. football every Tuesday 16:30-17:30."""
+
+    title: str
+    weekdays: tuple[int, ...]
+    start: time
+    end: time
+    location: str = ""
+    first: date | None = None
+    last: date | None = None
+    skip: frozenset[date] = frozenset()
+
+
+@dataclass(frozen=True)
+class Person:
     id: str
     name: str
     color: str
-    url: str
+    feed_url: str | None = None
     private: bool = False
+    activities: tuple[Activity, ...] = field(default_factory=tuple)
 
     def public(self) -> dict:
         """What the browser may see: never the feed URL, which is a secret."""
@@ -43,15 +58,11 @@ class CalendarSource:
 
 @dataclass(frozen=True)
 class Settings:
-    calendars: tuple[CalendarSource, ...]
+    people: tuple[Person, ...]
     password: str | None
     secret_key: str
     timezone: ZoneInfo
     cache_seconds: int
-
-
-def _truthy(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "on", "כן"}
 
 
 def normalize_url(url: str) -> str:
@@ -62,26 +73,94 @@ def normalize_url(url: str) -> str:
     return url
 
 
-def load_calendars(env=os.environ) -> tuple[CalendarSource, ...]:
-    calendars = []
-    for i in range(1, MAX_CALENDARS + 1):
-        url = (env.get(f"CAL_{i}_URL") or "").strip()
-        if not url:
+def _date(value, where: str) -> date | None:
+    if value is None or isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value).strip())
+    except ValueError:
+        raise ConfigError(f"{where}: תאריך לא תקין '{value}' (צריך להיות 2026-09-01)") from None
+
+
+def _weekdays(value, where: str) -> tuple[int, ...]:
+    names = value if isinstance(value, list) else re.split(r"[,\s]+|\bו", str(value or ""))
+    days = []
+    for name in names:
+        name = str(name).strip().removeprefix("יום").strip()
+        if not name:
             continue
-        calendars.append(
-            CalendarSource(
-                id=f"cal{i}",
-                name=(env.get(f"CAL_{i}_NAME") or "").strip() or f"יומן {i}",
-                color=(env.get(f"CAL_{i}_COLOR") or "").strip()
-                or DEFAULT_COLORS[(i - 1) % len(DEFAULT_COLORS)],
-                url=normalize_url(url),
-                private=_truthy(env.get(f"CAL_{i}_PRIVATE")),
+        if name not in HEBREW_DAYS:
+            raise ConfigError(f"{where}: יום לא מוכר '{name}' (ראשון, שני, … שבת)")
+        days.append(HEBREW_DAYS[name])
+    if not days:
+        raise ConfigError(f"{where}: חסר יום (day)")
+    return tuple(days)
+
+
+def _hours(value, where: str) -> tuple[time, time]:
+    # YAML reads an unquoted 16:30 as a number (990), so ask for quotes.
+    match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})\s*", str(value or ""))
+    if not isinstance(value, str) or not match:
+        raise ConfigError(f'{where}: שעות לא תקינות {value!r} (צריך להיות "16:30-17:30" עם מרכאות)')
+    h1, m1, h2, m2 = map(int, match.groups())
+    try:
+        start, end = time(h1, m1), time(h2, m2)
+    except ValueError:
+        raise ConfigError(f"{where}: שעה לא קיימת {value!r}") from None
+    if end <= start:
+        raise ConfigError(f"{where}: שעת הסיום לפני שעת ההתחלה {value!r}")
+    return start, end
+
+
+def _activity(raw: dict, where: str) -> Activity:
+    title = str(raw.get("title") or "").strip()
+    if not title:
+        raise ConfigError(f"{where}: חסר שם לחוג (title)")
+    where = f"{where} ({title})"
+    start, end = _hours(raw.get("time"), where)
+    return Activity(
+        title=title,
+        weekdays=_weekdays(raw.get("day"), where),
+        start=start,
+        end=end,
+        location=str(raw.get("location") or "").strip(),
+        first=_date(raw.get("from"), where),
+        last=_date(raw.get("until"), where),
+        skip=frozenset(_date(d, where) for d in raw.get("skip") or []),
+    )
+
+
+def load_people(path: Path = DEFAULT_FAMILY_FILE, env=os.environ) -> tuple[Person, ...]:
+    try:
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, ValueError) as exc:  # ValueError: e.g. a 13th month
+        raise ConfigError(f"family.yaml: הקובץ לא תקין: {exc}") from None
+    people, seen = [], set()
+    for i, raw in enumerate(data.get("people") or []):
+        pid = str(raw.get("id") or "").strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", pid):
+            raise ConfigError(f"family.yaml: id '{pid}' צריך להיות באותיות אנגליות קטנות (למשל leo)")
+        if pid in seen:
+            raise ConfigError(f"family.yaml: id '{pid}' מופיע פעמיים")
+        seen.add(pid)
+        name = str(raw.get("name") or "").strip() or pid
+        people.append(
+            Person(
+                id=pid,
+                name=name,
+                color=str(raw.get("color") or "").strip() or DEFAULT_COLORS[i % len(DEFAULT_COLORS)],
+                feed_url=normalize_url(env.get(f"FEED_{pid.upper()}") or "") or None,
+                private=bool(raw.get("private")),
+                activities=tuple(
+                    _activity(a or {}, f"family.yaml, {name}")
+                    for a in raw.get("activities") or []
+                ),
             )
         )
-    return tuple(calendars)
+    return tuple(people)
 
 
-def load_settings(env=os.environ) -> Settings:
+def load_settings(env=os.environ, family_file: Path | None = None) -> Settings:
     password = (env.get("FAMILY_PASSWORD") or "").strip() or None
     # Without an explicit key, sessions are tied to the password: changing the
     # password signs everyone out.
@@ -89,7 +168,7 @@ def load_settings(env=os.environ) -> Settings:
         ("family-calendar:" + (password or "")).encode()
     ).hexdigest()
     return Settings(
-        calendars=load_calendars(env),
+        people=load_people(family_file or Path(env.get("FAMILY_FILE") or DEFAULT_FAMILY_FILE), env),
         password=password,
         secret_key=secret_key,
         timezone=ZoneInfo((env.get("TIMEZONE") or "Asia/Jerusalem").strip()),

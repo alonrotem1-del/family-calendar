@@ -7,7 +7,7 @@ const REFRESH_MS = 10 * 60 * 1000;
 
 const state = {
   timezone: "Asia/Jerusalem",
-  calendars: [],
+  people: [],
   hidden: new Set(readStored("hidden", [])),
   weekStart: null,
   data: null,
@@ -116,9 +116,9 @@ $("logout").addEventListener("click", async () => {
 // ---- Loading --------------------------------------------------------------
 
 async function start() {
-  const info = await api("/api/calendars");
+  const info = await api("/api/people");
   state.timezone = info.timezone;
-  state.calendars = info.calendars;
+  state.people = info.people;
   state.weekStart = sundayOf(todayInZone());
   $("login").hidden = true;
   $("app").hidden = false;
@@ -208,7 +208,7 @@ function renderRange() {
 function renderFilters() {
   const nav = $("filters");
   nav.replaceChildren();
-  for (const cal of state.calendars) {
+  for (const cal of state.people) {
     const chip = el("button", {
       className: "chip",
       type: "button",
@@ -224,8 +224,8 @@ function renderFilters() {
     });
     nav.append(chip);
   }
-  if (!state.calendars.length) {
-    renderNotices(["עדיין לא הוגדרו יומנים. ראו את קובץ ההוראות (README)."]);
+  if (!state.people.length) {
+    renderNotices(["עדיין לא הוגדרו בני משפחה (family.yaml)."]);
   }
 }
 
@@ -233,8 +233,8 @@ function renderNotices(messages) {
   $("notices").replaceChildren(...messages.map((m) => el("div", { className: "notice" }, m)));
 }
 
-function calendarById(id) {
-  return state.calendars.find((c) => c.id === id) || { name: "", color: "#9ca3af" };
+function personById(id) {
+  return state.people.find((c) => c.id === id) || { name: "", color: "#9ca3af" };
 }
 
 /** Days of the week an event appears on (all-day events span each of their days). */
@@ -255,11 +255,11 @@ function renderWeek() {
   const data = state.data;
   if (data) {
     for (const event of data.events) {
-      if (state.hidden.has(event.calendar)) continue;
+      if (state.hidden.has(event.person)) continue;
       for (const day of daysOf(event)) byDay.get(day)?.push(event);
     }
     const notices = data.errors.map((e) => {
-      const name = calendarById(e.calendar).name;
+      const name = personById(e.person).name;
       return `${name}: ${e.message}` + (e.stale ? " (מוצגת הגרסה האחרונה שנטענה)" : "");
     });
     renderNotices(notices);
@@ -288,7 +288,7 @@ function renderWeek() {
 }
 
 function renderEvent(event) {
-  const cal = calendarById(event.calendar);
+  const cal = personById(event.person);
   let time;
   if (event.allDay) time = "כל היום";
   else time = `${timeOf(event.start)}–${timeOf(event.end)}`;

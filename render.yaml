@@ -11,15 +11,8 @@ services:
         value: "3.12.8"
       - key: FAMILY_PASSWORD
         sync: false
-      - key: CAL_1_NAME
-        value: אבא
-      - key: CAL_1_URL
+      # The secret iCal links. Names and colors live in family.yaml.
+      - key: FEED_ABA
         sync: false
-      - key: CAL_2_NAME
-        value: אמא
-      - key: CAL_2_URL
-        sync: false
-      - key: CAL_3_NAME
-        value: חוגים
-      - key: CAL_3_URL
+      - key: FEED_IMA
         sync: false

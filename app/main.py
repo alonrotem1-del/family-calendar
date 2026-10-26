@@ -11,7 +11,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .config import Settings, load_settings
-from .feeds import FeedCache, Fetcher, events_between, http_fetch, sort_key
+from .feeds import (
+    FeedCache,
+    Fetcher,
+    activities_between,
+    events_between,
+    http_fetch,
+    sort_key,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_COOKIE = "fc_session"
@@ -70,11 +77,11 @@ def create_app(settings: Settings | None = None, fetch: Fetcher = http_fetch) ->
         response.delete_cookie(SESSION_COOKIE)
         return {"authenticated": False}
 
-    @app.get("/api/calendars", dependencies=[Depends(require_session)])
-    def calendars():
+    @app.get("/api/people", dependencies=[Depends(require_session)])
+    def people():
         return {
             "timezone": settings.timezone.key,
-            "calendars": [c.public() for c in settings.calendars],
+            "people": [p.public() for p in settings.people],
         }
 
     @app.get("/api/events", dependencies=[Depends(require_session)])
@@ -82,23 +89,24 @@ def create_app(settings: Settings | None = None, fetch: Fetcher = http_fetch) ->
         if end <= start or end - start > timedelta(days=MAX_RANGE_DAYS):
             raise HTTPException(status_code=400, detail="טווח תאריכים לא תקין")
 
-        results = await asyncio.gather(*(cache.get(c.url) for c in settings.calendars))
+        with_feed = [p for p in settings.people if p.feed_url]
+        results = await asyncio.gather(*(cache.get(p.feed_url) for p in with_feed))
         all_events, errors = [], []
-        for source, result in zip(settings.calendars, results):
+        for person in settings.people:
+            all_events.extend(activities_between(person, start, end, settings.timezone))
+        for person, result in zip(with_feed, results):
             if result.error:
-                errors.append(
-                    {"calendar": source.id, "message": result.error, "stale": result.stale}
-                )
+                errors.append({"person": person.id, "message": result.error, "stale": result.stale})
             if result.calendar is None:
                 continue
             try:
                 all_events.extend(
-                    events_between(result.calendar, source, start, end, settings.timezone)
+                    events_between(result.calendar, person, start, end, settings.timezone)
                 )
             except Exception as exc:  # one malformed event must not hide the others
                 errors.append(
                     {
-                        "calendar": source.id,
+                        "person": person.id,
                         "message": f"שגיאה בקריאת היומן ({type(exc).__name__})",
                         "stale": False,
                     }
