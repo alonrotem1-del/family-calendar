@@ -30,11 +30,11 @@
     <header class="toolbar">
       <div class="nav">
         <!-- SVG rather than ‹ ›, which some browsers mirror in RTL and some don't -->
-        <button id="prev" class="icon-btn" aria-label="השבוע הקודם">
+        <button id="prev" class="icon-btn" aria-label="הקודם">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <button id="today" class="today-btn">היום</button>
-        <button id="next" class="icon-btn" aria-label="השבוע הבא">
+        <button id="next" class="icon-btn" aria-label="הבא">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
@@ -42,15 +42,34 @@
       <button id="refresh" class="icon-btn" aria-label="רענון">⟳</button>
     </header>
 
-    <nav id="filters" class="filters" aria-label="סינון לפי בן משפחה"></nav>
+    <div class="controls">
+      <div class="view-toggle" role="group" aria-label="תצוגה">
+        <button type="button" data-view="day">יום</button>
+        <button type="button" data-view="week">שבוע</button>
+      </div>
+      <nav id="filters" class="filters" aria-label="סינון לפי בן משפחה"></nav>
+    </div>
     <div id="notices" class="notices" role="status"></div>
-    <div id="week" class="week"></div>
 
-    <footer class="footer">
-      <span id="updated"></span>
-      <button id="logout" class="link-btn">יציאה</button>
-    </footer>
+    <div id="scroller" class="scroller">
+      <div id="cal-head" class="cal-head"></div>
+      <div id="cal-body" class="cal-body"></div>
+      <footer class="footer">
+        <span id="updated"></span>
+        <button id="logout" class="link-btn">יציאה</button>
+      </footer>
+    </div>
   </main>
+
+  <dialog id="details" class="details">
+    <form method="dialog">
+      <div class="details-person"><span class="dot"></span><span id="details-person"></span></div>
+      <h2 id="details-title"></h2>
+      <p id="details-when"></p>
+      <p id="details-where"></p>
+      <button class="details-close">סגירה</button>
+    </form>
+  </dialog>
 
   <script src="/app.js"></script>
 </body>
