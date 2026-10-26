@@ -19,3 +19,6 @@ services:
       # Where events added in the app are kept (Neon's free Postgres).
       - key: DATABASE_URL
         sync: false
+      # Neon's direct (non-pooled) connection, used to create the table at startup.
+      - key: DATABASE_URL_UNPOOLED
+        sync: false

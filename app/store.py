@@ -1,7 +1,9 @@
 """Events the family adds in the app itself (a parents' evening, a birthday).
 
 Kept in Postgres when DATABASE_URL is set (Neon's free plan in production),
-otherwise in a local SQLite file. That file is fine on a laptop, but on
+otherwise in a local SQLite file. On Neon, DATABASE_URL is the pooled
+connection for everyday queries and DATABASE_URL_UNPOOLED the direct one,
+which Neon recommends for schema changes like creating the table. That file is fine on a laptop, but on
 Render's free plan it is wiped on every restart, so the app warns about it.
 """
 
@@ -31,10 +33,15 @@ COLUMNS = "id, title, people, start_at, end_at, all_day, location, first_day, la
 
 
 class EventStore:
-    def __init__(self, database_url: str | None = None, sqlite_path: Path | None = None):
+    def __init__(
+        self,
+        database_url: str | None = None,
+        sqlite_path: Path | None = None,
+        direct_url: str | None = None,
+    ):
         self.database_url = database_url
         self.sqlite_path = sqlite_path or Path(os.environ.get("SQLITE_PATH") or "family-events.db")
-        with self._connect() as db:
+        with self._connect(direct_url) as db:
             db.execute(SCHEMA)
 
     @property
@@ -42,12 +49,14 @@ class EventStore:
         return self.database_url is not None
 
     @contextmanager
-    def _connect(self):
+    def _connect(self, url: str | None = None):
         if self.database_url:
             import psycopg  # only needed in production
 
-            with psycopg.connect(self.database_url) as conn:  # commits on success
-                yield _Postgres(conn)
+            # No server-side prepared statements: through Neon's pooler a later
+            # request may land on a backend that never saw them.
+            with psycopg.connect(url or self.database_url, prepare_threshold=None) as conn:
+                yield _Postgres(conn)  # commits on success
         else:
             conn = sqlite3.connect(self.sqlite_path)
             try:

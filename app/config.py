@@ -64,6 +64,7 @@ class Settings:
     timezone: ZoneInfo
     cache_seconds: int
     database_url: str | None = None
+    database_url_unpooled: str | None = None
 
 
 def normalize_url(url: str) -> str:
@@ -175,4 +176,5 @@ def load_settings(env=os.environ, family_file: Path | None = None) -> Settings:
         timezone=ZoneInfo((env.get("TIMEZONE") or "Asia/Jerusalem").strip()),
         cache_seconds=int(env.get("CACHE_SECONDS") or 600),
         database_url=(env.get("DATABASE_URL") or "").strip() or None,
+        database_url_unpooled=(env.get("DATABASE_URL_UNPOOLED") or "").strip() or None,
     )

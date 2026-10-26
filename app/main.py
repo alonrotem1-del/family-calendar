@@ -96,7 +96,7 @@ def create_app(
     store: EventStore | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
-    store = store or EventStore(settings.database_url)
+    store = store or EventStore(settings.database_url, direct_url=settings.database_url_unpooled)
     cache = FeedCache(fetch=fetch, ttl=settings.cache_seconds)
     session_token = hmac.new(
         settings.secret_key.encode(), b"family-calendar-session-v1", hashlib.sha256
