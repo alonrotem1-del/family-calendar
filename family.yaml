@@ -32,9 +32,22 @@ people:
   - id: leo
     name: ליאו
     color: "#2563eb"   # כחול
-    activities: []
+    activities:
+      - title: כדורגל
+        day: חמישי
+        time: "17:20-18:10"
+        location: גן שמואל
 
   - id: romi
     name: רומי
     color: "#16a34a"   # ירוק
-    activities: []
+    activities:
+      - title: אקרויוגה
+        day: [ראשון, רביעי]
+        time: "17:00-18:00"
+        location: רבין
+
+      - title: כדורגל
+        day: חמישי
+        time: "17:30-18:20"
+        location: גן שמואל
