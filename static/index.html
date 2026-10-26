@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>יומן משפחתי</title>
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="יומן משפחתי">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <section id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <img src="/icons/icon.svg" alt="" width="64" height="64">
+      <h1>יומן משפחתי</h1>
+      <label for="password">סיסמת המשפחה</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button type="submit">כניסה</button>
+      <p id="login-error" class="login-error" role="alert"></p>
+    </form>
+  </section>
+
+  <main id="app" hidden>
+    <header class="toolbar">
+      <div class="nav">
+        <!-- SVG rather than ‹ ›, which some browsers mirror in RTL and some don't -->
+        <button id="prev" class="icon-btn" aria-label="השבוע הקודם">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="today" class="today-btn">היום</button>
+        <button id="next" class="icon-btn" aria-label="השבוע הבא">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <h1 id="range" class="range"></h1>
+      <button id="refresh" class="icon-btn" aria-label="רענון">⟳</button>
+    </header>
+
+    <nav id="filters" class="filters" aria-label="סינון לפי יומן"></nav>
+    <div id="notices" class="notices" role="status"></div>
+    <div id="week" class="week"></div>
+
+    <footer class="footer">
+      <span id="updated"></span>
+      <button id="logout" class="link-btn">יציאה</button>
+    </footer>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
