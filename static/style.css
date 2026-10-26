@@ -121,23 +121,19 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #refresh.spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(-360deg); } }
 
-.controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-}
+/* Day / work week / week: one full-width row, like the iPhone's own switches */
 .view-toggle {
-  flex: 0 0 auto;
-  display: inline-flex;
+  display: flex;
   padding: 3px;
   border-radius: 10px;
   background: var(--border);
+  margin-bottom: 8px;
 }
 .view-toggle button {
+  flex: 1;
   border: 0;
   background: transparent;
-  padding: 4px 10px;
+  padding: 6px 4px;
   border-radius: 8px;
   font-size: .9rem;
 }
@@ -150,10 +146,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* One row of names that scrolls sideways on a narrow phone */
 .filters {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   overflow-x: auto;
   scrollbar-width: none;
   padding: 2px 0;
+  margin-bottom: 8px;
 }
 .filters::-webkit-scrollbar { display: none; }
 /* Tinted with the person's color (no dot), so all five names fit on a phone */
@@ -288,7 +285,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* Week view on a phone: seven narrow columns. Small text, the color says who. */
 @media (max-width: 700px) {
   .scroller:not(.day-view) .event { font-size: .68rem; line-height: 1.15; padding: 2px 3px; border-inline-start-width: 2px; }
-  .scroller:not(.day-view) .event .who { display: none; }
+  .scroller.view-week .event .who { display: none; }
+  .scroller.view-workweek .event { font-size: .74rem; }
   .scroller:not(.day-view) .event .title { font-weight: 500; }
   :root { --axis: 38px; }
 }

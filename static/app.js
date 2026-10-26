@@ -8,13 +8,16 @@ const REFRESH_MS = 10 * 60 * 1000;
 const FOCUS_START = 14.75;
 const FOCUS_HOURS = 4.5;
 const MIN_EVENT_MINUTES = 25; // shorter events still get a tappable box
+// "workweek" is Sunday to Thursday, the default; "week" adds Friday and Saturday.
+const VIEWS = ["day", "workweek", "week"];
+const VIEW_DAYS = { day: 1, workweek: 5, week: 7 };
 
 const state = {
   timezone: "Asia/Jerusalem",
   people: [],
   hidden: new Set(readStored("hidden", [])),
-  view: readStored("view", "week") === "day" ? "day" : "week",
-  anchor: null, // the day shown in day view; its week in week view
+  view: VIEWS.includes(readStored("view")) ? readStored("view") : "workweek",
+  anchor: null, // the day shown in day view; its week in the week views
   weeks: new Map(), // week start -> /api/events response
 };
 
@@ -85,7 +88,7 @@ function timeOf(instant) {
 function visibleDays() {
   if (state.view === "day") return [state.anchor];
   const first = sundayOf(state.anchor);
-  return Array.from({ length: 7 }, (_, i) => addDays(first, i));
+  return Array.from({ length: VIEW_DAYS[state.view] }, (_, i) => addDays(first, i));
 }
 
 // ---- Server ---------------------------------------------------------------
@@ -278,7 +281,7 @@ function renderRange() {
       .format(utcDate(state.anchor));
   } else {
     const first = sundayOf(state.anchor);
-    const last = addDays(first, 6);
+    const last = addDays(first, VIEW_DAYS[state.view] - 1);
     // The year only when it isn't this year, so the title fits on a phone.
     const thisYear = todayInZone().slice(0, 4);
     const showYear = first.slice(0, 4) !== thisYear || last.slice(0, 4) !== thisYear;
@@ -374,6 +377,7 @@ function render() {
   const scroller = $("scroller");
   scroller.style.setProperty("--days", days.length);
   scroller.classList.toggle("day-view", isDay);
+  for (const view of VIEWS) scroller.classList.toggle("view-" + view, view === state.view);
 
   // Head: day names (tap one in week view to open that day), then all-day events.
   const dayName = new Intl.DateTimeFormat("he-IL", { weekday: isDay ? "long" : "narrow", timeZone: "UTC" });
