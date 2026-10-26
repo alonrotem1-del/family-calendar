@@ -232,7 +232,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .all-day-label { font-size: .7rem; color: var(--muted); align-self: center; text-align: center; }
 .all-day-cell { padding: 2px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.all-day-cell .event { position: static; height: auto; padding: 2px 5px; }
+.all-day-cell .event { position: relative; height: auto; padding: 2px 5px; padding-inline-start: 8px; }
 
 .cal-body {
   display: grid;
@@ -266,9 +266,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border: 0;
   margin: 0;
   text-align: start;
-  padding: 3px 5px;
+  padding: 3px 5px 3px 5px;
+  padding-inline-start: 8px;
   border-radius: 6px;
-  border-inline-start: 3px solid var(--c);
   background: color-mix(in srgb, var(--c) 22%, var(--surface));
   color: var(--text);
   font-size: .78rem;
@@ -277,6 +277,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
   flex-direction: column;
   gap: 1px;
 }
+/* The edge strip: one color band per person in the event */
+.event::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 3px;
+  background: var(--stripe, var(--c));
+}
 .event .title { font-weight: 600; overflow-wrap: anywhere; }
 .event .who { color: var(--muted); font-size: .72rem; overflow-wrap: anywhere; }
 .day-view .event { font-size: .9rem; padding: 4px 8px; }
@@ -284,7 +293,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Week view on a phone: seven narrow columns. Small text, the color says who. */
 @media (max-width: 700px) {
-  .scroller:not(.day-view) .event { font-size: .68rem; line-height: 1.15; padding: 2px 3px; border-inline-start-width: 2px; }
+  .scroller:not(.day-view) .event { font-size: .68rem; line-height: 1.15; padding: 2px 3px; padding-inline-start: 5px; }
+  .scroller:not(.day-view) .event::before { width: 2px; }
   .scroller.view-week .event .who { display: none; }
   .scroller.view-workweek .event { font-size: .74rem; }
   .scroller:not(.day-view) .event .title { font-weight: 500; }
@@ -335,7 +345,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .details::backdrop { background: rgba(15, 23, 42, .45); }
 .details-person { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .9rem; }
+.details-person { flex-wrap: wrap; }
 .details-person .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--c); }
+.details-person .name { margin-inline-end: 8px; }
 .details h2 { margin: 8px 0 10px; font-size: 1.25rem; }
 .details p { margin: 4px 0; }
 .details p:empty { display: none; }
@@ -347,3 +359,54 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-radius: 10px;
   background: var(--bg);
 }
+
+/* Add button and the add / edit form */
+.fab {
+  position: fixed;
+  inset-inline-end: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 10;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, .4);
+}
+
+.dialog-buttons { display: flex; gap: 8px; margin-top: 16px; }
+.dialog-buttons button {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.dialog-buttons .primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.dialog-buttons .danger { color: #dc2626; }
+#details-actions + .details-close { margin-top: 8px; }
+
+.editor { max-height: calc(100dvh - 32px); overflow-y: auto; }
+.editor h2 { margin: 0 0 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; font-size: .9rem; color: var(--muted); }
+.field input {
+  font: inherit;
+  font-size: 1rem; /* 16px or more, so iPhone doesn't zoom in on focus */
+  color: var(--text);
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  width: 100%;
+}
+.check { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.check input { width: 20px; height: 20px; }
+.ed-times { display: flex; gap: 10px; }
+.ed-times .field { flex: 1; }
+.ed-people { display: flex; flex-wrap: wrap; gap: 6px; }
+.ed-people .chip { font-size: .95rem; padding: 6px 12px; }
+.ed-people .chip.everyone { --c: var(--muted); }
+.editor .notice { margin: 0 0 8px; }

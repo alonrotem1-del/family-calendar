@@ -3,7 +3,8 @@
 import asyncio
 import hashlib
 import hmac
-from datetime import date, datetime, timedelta, timezone
+import re
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -19,6 +20,7 @@ from .feeds import (
     http_fetch,
     sort_key,
 )
+from .store import EventStore
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_COOKIE = "fc_session"
@@ -29,8 +31,72 @@ class Login(BaseModel):
     password: str
 
 
-def create_app(settings: Settings | None = None, fetch: Fetcher = http_fetch) -> FastAPI:
+class FamilyEvent(BaseModel):
+    """An event added in the app. One or more family members can be in it."""
+
+    title: str
+    people: list[str]
+    date: date
+    allDay: bool = False
+    start: str | None = None  # "17:00"
+    end: str | None = None  # "18:30"
+    location: str = ""
+
+
+def _clock(value: str | None, label: str) -> time:
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", (value or "").strip())
+    if not match or int(match[1]) > 23 or int(match[2]) > 59:
+        raise HTTPException(status_code=400, detail=f"{label} לא תקינה")
+    return time(int(match[1]), int(match[2]))
+
+
+def to_stored(body: FamilyEvent, settings: Settings) -> dict:
+    """Checks a new or edited event and turns it into what the store keeps."""
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="צריך לכתוב שם לאירוע")
+    if len(title) > 120:
+        raise HTTPException(status_code=400, detail="השם ארוך מדי")
+    known = [p.id for p in settings.people]
+    if set(body.people) - set(known):
+        raise HTTPException(status_code=400, detail="בן משפחה לא מוכר")
+    people = [p for p in known if p in set(body.people)]  # family order, no repeats
+    if not people:
+        raise HTTPException(status_code=400, detail="צריך לבחור לפחות בן משפחה אחד")
+    day = body.date.isoformat()
+    if body.allDay:
+        start, end = day, (body.date + timedelta(days=1)).isoformat()
+    else:
+        begins, ends = _clock(body.start, "שעת ההתחלה"), _clock(body.end, "שעת הסיום")
+        if ends <= begins:
+            raise HTTPException(status_code=400, detail="שעת הסיום צריכה להיות אחרי שעת ההתחלה")
+        start = datetime.combine(body.date, begins, tzinfo=settings.timezone).isoformat()
+        end = datetime.combine(body.date, ends, tzinfo=settings.timezone).isoformat()
+    return {
+        "title": title,
+        "people": people,
+        "start": start,
+        "end": end,
+        "allDay": body.allDay,
+        "location": body.location.strip()[:200],
+        "first_day": day,
+        "last_day": day,
+    }
+
+
+def to_api(stored: dict) -> dict:
+    return {
+        key: stored[key] for key in ("id", "title", "people", "start", "end", "allDay", "location")
+    } | {"editable": True}
+
+
+def create_app(
+    settings: Settings | None = None,
+    fetch: Fetcher = http_fetch,
+    store: EventStore | None = None,
+) -> FastAPI:
     settings = settings or load_settings()
+    store = store or EventStore(settings.database_url)
     cache = FeedCache(fetch=fetch, ttl=settings.cache_seconds)
     session_token = hmac.new(
         settings.secret_key.encode(), b"family-calendar-session-v1", hashlib.sha256
@@ -82,6 +148,8 @@ def create_app(settings: Settings | None = None, fetch: Fetcher = http_fetch) ->
         return {
             "timezone": settings.timezone.key,
             "people": [p.public() for p in settings.people],
+            # Without a database, added events vanish when Render restarts the app.
+            "storage": "durable" if store.durable else "temporary",
         }
 
     @app.get("/api/events", dependencies=[Depends(require_session)])
@@ -90,8 +158,12 @@ def create_app(settings: Settings | None = None, fetch: Fetcher = http_fetch) ->
             raise HTTPException(status_code=400, detail="טווח תאריכים לא תקין")
 
         with_feed = [p for p in settings.people if p.feed_url]
-        results = await asyncio.gather(*(cache.get(p.feed_url) for p in with_feed))
-        all_events, errors = [], []
+        added, *results = await asyncio.gather(
+            asyncio.to_thread(store.between, start.isoformat(), end.isoformat()),
+            *(cache.get(p.feed_url) for p in with_feed),
+        )
+        all_events = [to_api(e) for e in added]
+        errors = []
         for person in settings.people:
             all_events.extend(activities_between(person, start, end, settings.timezone))
         for person, result in zip(with_feed, results):
@@ -117,6 +189,23 @@ def create_app(settings: Settings | None = None, fetch: Fetcher = http_fetch) ->
             "errors": errors,
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
+
+    @app.post("/api/events", dependencies=[Depends(require_session)])
+    def add_event(body: FamilyEvent):
+        return to_api(store.save(to_stored(body, settings)))
+
+    @app.put("/api/events/{event_id}", dependencies=[Depends(require_session)])
+    def edit_event(event_id: str, body: FamilyEvent):
+        saved = store.save(to_stored(body, settings), event_id)
+        if saved is None:
+            raise HTTPException(status_code=404, detail="האירוע כבר לא קיים")
+        return to_api(saved)
+
+    @app.delete("/api/events/{event_id}", dependencies=[Depends(require_session)])
+    def delete_event(event_id: str):
+        if not store.delete(event_id):
+            raise HTTPException(status_code=404, detail="האירוע כבר לא קיים")
+        return {"deleted": True}
 
     @app.get("/api/health")
     def health():

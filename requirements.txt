@@ -7,3 +7,4 @@ x-wr-timezone==2.0.1
 tzdata==2026.5
 python-dotenv==1.2.4
 pyyaml==6.0.3
+psycopg[binary]==3.3.6

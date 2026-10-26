@@ -151,7 +151,7 @@ def events_between(
         events.append(
             {
                 "id": f"{person.id}:{component.get('UID', '')}:{start_value}",
-                "person": person.id,
+                "people": [person.id],
                 "title": title or "(ללא כותרת)",
                 "start": start_value,
                 "end": end_value,
@@ -173,7 +173,7 @@ def activities_between(person: Person, start: date, end: date, tz: ZoneInfo) -> 
             events.append(
                 {
                     "id": f"{person.id}:activity{index}:{day.isoformat()}",
-                    "person": person.id,
+                    "people": [person.id],
                     "title": activity.title,
                     "start": datetime.combine(day, activity.start, tzinfo=tz).isoformat(),
                     "end": datetime.combine(day, activity.end, tzinfo=tz).isoformat(),

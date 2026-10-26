@@ -58,15 +58,50 @@
         <button id="logout" class="link-btn">יציאה</button>
       </footer>
     </div>
+
+    <button id="add" class="fab" type="button" aria-label="הוספת אירוע">+</button>
   </main>
 
   <dialog id="details" class="details">
     <form method="dialog">
-      <div class="details-person"><span class="dot"></span><span id="details-person"></span></div>
+      <div id="details-person" class="details-person"></div>
       <h2 id="details-title"></h2>
       <p id="details-when"></p>
       <p id="details-where"></p>
+      <div id="details-actions" class="dialog-buttons" hidden>
+        <button type="button" id="details-edit">עריכה</button>
+        <button type="button" id="details-delete" class="danger">מחיקה</button>
+      </div>
       <button class="details-close">סגירה</button>
+    </form>
+  </dialog>
+
+  <dialog id="editor" class="details editor">
+    <form id="editor-form" novalidate>
+      <h2 id="editor-heading">אירוע חדש</h2>
+      <label class="field">מה
+        <input id="ed-title" maxlength="120" placeholder="למשל: יום הורים" autocomplete="off">
+      </label>
+      <div class="field">מי (אפשר כמה)
+        <div id="ed-people" class="ed-people"></div>
+      </div>
+      <label class="field">תאריך
+        <input id="ed-date" type="date">
+      </label>
+      <label class="check"><input id="ed-allday" type="checkbox"> כל היום</label>
+      <div id="ed-times" class="ed-times">
+        <label class="field">משעה <input id="ed-start" type="time" step="300" dir="ltr"></label>
+        <label class="field">עד <input id="ed-end" type="time" step="300" dir="ltr"></label>
+      </div>
+      <label class="field">איפה (לא חובה)
+        <input id="ed-location" maxlength="200" autocomplete="off">
+      </label>
+      <p id="ed-warning" class="notice" hidden>האפליקציה עוד לא מחוברת למסד נתונים, ולכן אירועים שמוסיפים יימחקו כשהשרת יופעל מחדש. ההוראות לחיבור נמצאות ב-README.</p>
+      <p id="ed-error" class="login-error" role="alert"></p>
+      <div class="dialog-buttons">
+        <button type="submit" class="primary">שמירה</button>
+        <button type="button" id="ed-cancel">ביטול</button>
+      </div>
     </form>
   </dialog>
 

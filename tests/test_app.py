@@ -1,3 +1,4 @@
+import os
 from datetime import date
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,7 @@ from pathlib import Path
 from app.config import ConfigError, load_people, load_settings
 from app.feeds import FeedCache, FeedError
 from app.main import create_app
+from app.store import EventStore
 
 TZ = ZoneInfo("Asia/Jerusalem")
 
@@ -114,7 +116,8 @@ def make_client(family_file, env=ENV, feeds=FEEDS):
             raise value
         return value
 
-    return TestClient(create_app(load_settings(env, family_file), fetch=fetch))
+    store = EventStore(sqlite_path=Path(family_file).parent / "events.db")
+    return TestClient(create_app(load_settings(env, family_file), fetch=fetch, store=store))
 
 
 def signed_in(client):
@@ -189,7 +192,7 @@ def test_feed_urls_are_never_sent_to_the_browser(family_file):
 def test_week_merges_feeds_and_activities(family_file):
     data = week(signed_in(make_client(family_file)))
     assert data["errors"] == []
-    got = [(e["person"], e["title"], e["start"]) for e in data["events"]]
+    got = [(e["people"][0], e["title"], e["start"]) for e in data["events"]]
     assert got == [
         ("aba", "Standup", "2026-10-26T09:00:00+02:00"),
         ("leo", "Basketball", "2026-10-26T17:00:00+02:00"),
@@ -212,7 +215,7 @@ def test_week_merges_feeds_and_activities(family_file):
 
 def test_activity_ends_after_until_date(family_file):
     data = week(signed_in(make_client(family_file)), "2026-11-01", "2026-11-08")
-    leo = [(e["title"], e["start"][:10]) for e in data["events"] if e["person"] == "leo"]
+    leo = [(e["title"], e["start"][:10]) for e in data["events"] if e["people"] == ["leo"]]
     assert leo == [("Piano", "2026-11-06")]
 
 
@@ -228,7 +231,7 @@ def test_a_broken_feed_is_reported_without_hiding_the_others(family_file):
     data = week(signed_in(make_client(family_file, feeds=feeds)))
     assert [e["person"] for e in data["errors"]] == ["aba"]
     assert data["errors"][0]["stale"] is False
-    assert {e["person"] for e in data["events"]} == {"kids", "leo"}
+    assert {e["people"][0] for e in data["events"]} == {"kids", "leo"}
 
 
 def test_invalid_range_rejected(family_file):
@@ -269,3 +272,135 @@ def test_static_app_is_served(family_file):
     assert "יומן משפחתי" in client.get("/").text
     assert client.get("/manifest.webmanifest").status_code == 200
     assert client.get("/sw.js").status_code == 200
+
+
+# ---- Events added in the app ----------------------------------------------
+
+PARENTS_EVENING = {
+    "title": "  יום הורים  ",
+    "people": ["leo", "aba"],  # stored in family order: aba first
+    "date": "2026-10-28",
+    "start": "18:30",
+    "end": "19:15",
+    "location": "בית הספר",
+}
+
+
+def test_add_an_event_for_two_people(family_file):
+    client = signed_in(make_client(family_file))
+    added = client.post("/api/events", json=PARENTS_EVENING)
+    assert added.status_code == 200, added.text
+    event = added.json()
+    assert event["title"] == "יום הורים"
+    assert event["people"] == ["aba", "leo"]
+    assert event["start"] == "2026-10-28T18:30:00+02:00"
+    assert event["editable"] is True
+
+    data = week(client)
+    shown = [e for e in data["events"] if e.get("editable")]
+    assert [e["id"] for e in shown] == [event["id"]]
+    # Feed and activity events are read-only.
+    assert not any(e.get("editable") for e in data["events"] if e["id"] != event["id"])
+    # Sorted in with everything else on Wednesday.
+    wednesday = [e["title"] for e in data["events"] if e["start"].startswith("2026-10-28")]
+    assert wednesday == ["Basketball", "יום הורים"]
+    # Not in other weeks.
+    assert not any(e.get("editable") for e in week(client, "2026-11-01", "2026-11-08")["events"])
+
+
+def test_all_day_event(family_file):
+    client = signed_in(make_client(family_file))
+    event = client.post("/api/events", json={
+        "title": "טיול", "people": ["leo"], "date": "2026-10-30", "allDay": True,
+    }).json()
+    assert (event["start"], event["end"], event["allDay"]) == ("2026-10-30", "2026-10-31", True)
+
+
+def test_edit_and_delete(family_file):
+    client = signed_in(make_client(family_file))
+    event = client.post("/api/events", json=PARENTS_EVENING).json()
+
+    edited = client.put(f"/api/events/{event['id']}", json={**PARENTS_EVENING, "start": "19:00", "end": "20:00", "people": ["kids"]})
+    assert edited.status_code == 200
+    assert edited.json()["people"] == ["kids"] and edited.json()["id"] == event["id"]
+    assert [e["start"] for e in week(client)["events"] if e.get("editable")] == ["2026-10-28T19:00:00+02:00"]
+
+    assert client.delete(f"/api/events/{event['id']}").status_code == 200
+    assert not any(e.get("editable") for e in week(client)["events"])
+    assert client.delete(f"/api/events/{event['id']}").status_code == 404
+    assert client.put(f"/api/events/{event['id']}", json=PARENTS_EVENING).status_code == 404
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        ({"title": "  "}, "שם"),
+        ({"people": []}, "לפחות"),
+        ({"people": ["stranger"]}, "לא מוכר"),
+        ({"start": "25:00"}, "שעת ההתחלה"),
+        ({"end": "18:00"}, "אחרי"),
+        ({"end": None}, "שעת הסיום"),
+    ],
+)
+def test_bad_events_are_refused_in_hebrew(family_file, change, message):
+    client = signed_in(make_client(family_file))
+    response = client.post("/api/events", json={**PARENTS_EVENING, **change})
+    assert response.status_code == 400
+    assert message in response.json()["detail"]
+
+
+def test_adding_requires_the_password(family_file):
+    client = make_client(family_file)
+    assert client.post("/api/events", json=PARENTS_EVENING).status_code == 401
+    assert client.delete("/api/events/x").status_code == 401
+
+
+def test_storage_kind_is_reported(family_file):
+    client = signed_in(make_client(family_file))
+    assert client.get("/api/people").json()["storage"] == "temporary"
+
+
+@pytest.fixture
+def postgres_url(tmp_path):
+    """A throwaway local Postgres, when the machine has one."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    bindir = next(Path("/usr/lib/postgresql").glob("*/bin"), None) if Path("/usr/lib/postgresql").exists() else None
+    initdb = shutil.which("initdb") or (bindir and str(bindir / "initdb"))
+    if not initdb:
+        pytest.skip("no local Postgres")
+    pg_ctl = str(Path(initdb).parent / "pg_ctl")
+    # Postgres refuses to run as root; then it runs as nobody, in a folder nobody can reach.
+    run_as = ["runuser", "-u", "nobody", "--"] if hasattr(os, "geteuid") and os.geteuid() == 0 else []
+    base = Path(tempfile.mkdtemp(prefix="family-calendar-pg-")) if run_as else tmp_path
+    base.chmod(0o777)
+    data, sock = base / "pg", base / "sock"
+    sock.mkdir()
+    sock.chmod(0o777)
+    subprocess.run(run_as + [initdb, "-D", str(data), "-A", "trust", "-U", "test"], check=True, capture_output=True)
+    # The server's output goes to a log file: a pipe it holds open would hang run().
+    subprocess.run(
+        run_as + [pg_ctl, "-D", str(data), "-l", str(base / "log"), "-o", f"-k {sock} -c listen_addresses=''", "-w", "start"],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+    )
+    try:
+        yield f"postgresql://test@/postgres?host={sock}"
+    finally:
+        subprocess.run(run_as + [pg_ctl, "-D", str(data), "-m", "fast", "stop"], capture_output=True, timeout=60)
+        if run_as:
+            shutil.rmtree(base, ignore_errors=True)
+
+
+def test_events_survive_in_postgres(family_file, postgres_url):
+    settings = load_settings({**ENV, "DATABASE_URL": postgres_url}, family_file)
+    client = signed_in(TestClient(create_app(settings, fetch=None, store=EventStore(postgres_url))))
+    assert client.get("/api/people").json()["storage"] == "durable"
+    event = client.post("/api/events", json=PARENTS_EVENING).json()
+    client.put(f"/api/events/{event['id']}", json={**PARENTS_EVENING, "title": "אסיפה"})
+
+    # A new app on the same database, as after a restart.
+    again = EventStore(postgres_url)
+    assert [(e["title"], e["people"]) for e in again.between("2026-10-25", "2026-11-01")] == [("אסיפה", ["aba", "leo"])]
+    assert again.delete(event["id"]) and again.between("2026-10-25", "2026-11-01") == []

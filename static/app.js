@@ -145,6 +145,7 @@ async function start() {
   state.timezone = info.timezone;
   partsFormat = null;
   state.people = info.people;
+  state.storage = info.storage;
   state.anchor = todayInZone();
   $("login").hidden = true;
   $("app").hidden = false;
@@ -362,7 +363,7 @@ function render() {
   const timed = new Map(days.map((d) => [d, []]));
   if (data) {
     for (const event of data.events) {
-      if (state.hidden.has(event.person)) continue;
+      if (event.people.every((id) => state.hidden.has(id))) continue;
       if (event.allDay) {
         for (const day of allDayDays(event)) allDay.get(day)?.push(event);
       } else {
@@ -411,6 +412,11 @@ function render() {
   }
   const columns = days.map((day) => {
     const col = el("div", { className: "day-col" + (day === today ? " is-today" : ""), "data-day": day });
+    col.addEventListener("click", (e) => {
+      if (e.target !== col) return; // a tap on an event opens the event instead
+      const halfHours = Math.floor((e.offsetY / hourPx) * 2);
+      openEditor(null, { day, start: clock(Math.min(halfHours * 30, 23 * 60)) });
+    });
     for (const item of arrange(timed.get(day))) {
       const box = eventBox(item.event, isDay);
       Object.assign(box.style, {
@@ -428,10 +434,23 @@ function render() {
   fitHours(); // the all-day row may have changed how much room is left
 }
 
+/** The edge strip of an event: one color band per person in it. */
+function stripe(people) {
+  if (people.length === 1) return people[0].color;
+  const band = 100 / people.length;
+  return `linear-gradient(to bottom, ${people.map((p, i) => `${p.color} ${i * band}% ${(i + 1) * band}%`).join(", ")})`;
+}
+
 function eventBox(event, detailed) {
-  const person = personById(event.person);
-  const who = detailed && event.location ? `${person.name} · ${event.location}` : person.name;
-  const box = el("button", { type: "button", className: "event", "--c": person.color }, [
+  const people = event.people.map(personById);
+  const names = people.map((p) => p.name).join(", ");
+  const who = detailed && event.location ? `${names} · ${event.location}` : names;
+  const box = el("button", {
+    type: "button",
+    className: "event",
+    "--c": people[0].color,
+    "--stripe": stripe(people),
+  }, [
     el("span", { className: "title" }, event.title),
     el("span", { className: "who" }, who),
   ]);
@@ -448,11 +467,19 @@ function placeNowLine() {
 }
 
 function showDetails(event) {
-  const person = personById(event.person);
   const dialog = $("details");
-  dialog.style.setProperty("--c", person.color);
-  $("details-person").textContent = person.name;
+  $("details-person").replaceChildren(...event.people.map(personById).flatMap((p) => [
+    el("span", { className: "dot", "--c": p.color }),
+    el("span", { className: "name" }, p.name),
+  ]));
   $("details-title").textContent = event.title;
+  // Only events added in the app can change; the rest belong to Outlook, Google or family.yaml.
+  $("details-actions").hidden = !event.editable;
+  $("details-edit").onclick = () => {
+    dialog.close();
+    openEditor(event);
+  };
+  $("details-delete").onclick = () => deleteEvent(event);
   const dateFmt = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "numeric", timeZone: "UTC" });
   if (event.allDay) {
     const last = addDays(event.end, -1);
@@ -468,10 +495,151 @@ function showDetails(event) {
   dialog.showModal();
 }
 
-// Tapping outside the details card closes it.
-$("details").addEventListener("click", (event) => {
-  if (event.target === $("details")) $("details").close();
+/** A tap outside the card closes it; a tap on the card's own padding does not. */
+function closeOnOutsideTap(dialog) {
+  dialog.addEventListener("click", (event) => {
+    if (event.target !== dialog) return;
+    const r = dialog.getBoundingClientRect();
+    const inside = event.clientX >= r.left && event.clientX <= r.right && event.clientY >= r.top && event.clientY <= r.bottom;
+    if (!inside) dialog.close();
+  });
+}
+closeOnOutsideTap($("details"));
+
+// ---- Adding and editing events --------------------------------------------
+
+let editing = null; // the event being edited; null when adding a new one
+let chosen = new Set(); // ids of the people in it
+let endTouched = false; // once the end time is set by hand, it no longer follows the start
+
+function clock(minutes) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function minutesOf(value) {
+  const [h, m] = value.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function hourLater(start) {
+  return clock(Math.min(minutesOf(start) + 60, 23 * 60 + 59));
+}
+
+/** The day a new event starts on: the day shown, or today if it's on screen. */
+function defaultDay() {
+  const days = visibleDays();
+  const today = todayInZone();
+  return days.includes(today) ? today : days[0];
+}
+
+function openEditor(event, preset = {}) {
+  editing = event || null;
+  endTouched = !!event;
+  $("editor-heading").textContent = event ? "עריכת אירוע" : "אירוע חדש";
+  $("ed-title").value = event ? event.title : "";
+  $("ed-date").value = event ? (event.allDay ? event.start : zoned(event.start).day) : preset.day || defaultDay();
+  $("ed-allday").checked = !!event?.allDay;
+  const start = event && !event.allDay ? timeOf(event.start) : preset.start || "17:00";
+  $("ed-start").value = start;
+  $("ed-end").value = event && !event.allDay ? timeOf(event.end) : hourLater(start);
+  $("ed-location").value = event?.location || "";
+  chosen = new Set(event ? event.people : []);
+  renderChosen();
+  $("ed-times").hidden = $("ed-allday").checked;
+  $("ed-warning").hidden = state.storage !== "temporary";
+  $("ed-error").textContent = "";
+  $("editor").showModal();
+  if (!event) $("ed-title").focus();
+}
+
+function renderChosen() {
+  const everyone = state.people.every((p) => chosen.has(p.id));
+  const all = el("button", { type: "button", className: "chip everyone", "aria-pressed": String(everyone) }, "כולם");
+  all.addEventListener("click", () => {
+    chosen = everyone ? new Set() : new Set(state.people.map((p) => p.id));
+    renderChosen();
+  });
+  const chips = state.people.map((person) => {
+    const chip = el("button", {
+      type: "button",
+      className: "chip",
+      "--c": person.color,
+      "aria-pressed": String(chosen.has(person.id)),
+    }, person.name);
+    chip.addEventListener("click", () => {
+      if (chosen.has(person.id)) chosen.delete(person.id);
+      else chosen.add(person.id);
+      renderChosen();
+    });
+    return chip;
+  });
+  $("ed-people").replaceChildren(...chips, all);
+}
+
+$("add").addEventListener("click", () => openEditor(null));
+$("editor-form").addEventListener("input", () => ($("ed-error").textContent = ""));
+$("ed-people").addEventListener("click", () => ($("ed-error").textContent = ""));
+$("ed-cancel").addEventListener("click", () => $("editor").close());
+$("ed-allday").addEventListener("change", () => ($("ed-times").hidden = $("ed-allday").checked));
+$("ed-end").addEventListener("input", () => (endTouched = true));
+$("ed-start").addEventListener("input", () => {
+  const start = $("ed-start").value;
+  if (start && (!endTouched || minutesOf($("ed-end").value || "00:00") <= minutesOf(start))) {
+    $("ed-end").value = hourLater(start);
+  }
 });
+
+$("editor-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const date = $("ed-date").value;
+  const body = {
+    title: $("ed-title").value,
+    people: state.people.map((p) => p.id).filter((id) => chosen.has(id)),
+    date,
+    allDay: $("ed-allday").checked,
+    start: $("ed-start").value || null,
+    end: $("ed-end").value || null,
+    location: $("ed-location").value,
+  };
+  // Say what's missing here rather than after a round trip.
+  const missing = !body.title.trim() ? "צריך לכתוב מה האירוע"
+    : !body.people.length ? "צריך לבחור מי מהמשפחה"
+    : !date ? "צריך לבחור תאריך" : "";
+  if (missing) {
+    $("ed-error").textContent = missing;
+    return;
+  }
+  const save = $("editor-form").querySelector("[type=submit]");
+  save.disabled = true;
+  try {
+    await api(editing ? `/api/events/${editing.id}` : "/api/events", {
+      method: editing ? "PUT" : "POST",
+      body: JSON.stringify(body),
+    });
+    $("editor").close();
+    // Show the week (or day) the event is on.
+    if (state.view === "day" || !visibleDays().includes(date)) state.anchor = date;
+    render();
+    await load();
+  } catch (error) {
+    if (error.message !== "unauthenticated") $("ed-error").textContent = error.message;
+  } finally {
+    save.disabled = false;
+  }
+});
+
+async function deleteEvent(event) {
+  if (!confirm(`למחוק את "${event.title}"?`)) return;
+  try {
+    await api(`/api/events/${event.id}`, { method: "DELETE" });
+    $("details").close();
+    await load();
+  } catch (error) {
+    if (error.message !== "unauthenticated") alert(error.message);
+  }
+}
+
+closeOnOutsideTap($("editor"));
 
 // ---- Boot -----------------------------------------------------------------
 

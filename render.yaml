@@ -16,3 +16,6 @@ services:
         sync: false
       - key: FEED_IMA
         sync: false
+      # Where events added in the app are kept (Neon's free Postgres).
+      - key: DATABASE_URL
+        sync: false

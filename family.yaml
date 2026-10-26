@@ -28,6 +28,22 @@ people:
   - id: yuli
     name: יולי
     color: "#ec4899"   # ורוד
+    activities:
+      - title: היפ הופ
+        day: ראשון
+        time: "16:45-19:15"
+
+      - title: היפ הופ
+        day: שני
+        time: "15:30-18:00"
+
+      - title: היפ הופ
+        day: רביעי
+        time: "16:00-17:00"
+
+      - title: היפ הופ
+        day: חמישי
+        time: "16:15-17:15"
 
   - id: leo
     name: ליאו
