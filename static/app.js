@@ -371,8 +371,13 @@ function render() {
         for (const piece of pieces(event)) timed.get(piece.day)?.push(piece);
       }
     }
-    renderNotices(data.errors.map((e) =>
-      (e.person ? `${personById(e.person).name}: ` : "") + e.message + (e.stale ? " (מוצגת הגרסה האחרונה שנטענה)" : "")));
+    const notices = data.errors.map((e) =>
+      (e.person ? `${personById(e.person).name}: ` : "") + e.message + (e.stale ? " (מוצגת הגרסה האחרונה שנטענה)" : ""));
+    // Not only inside the form: an event that vanishes later is the first sign of this.
+    if (state.storage === "temporary") {
+      notices.unshift("⚠️ אין חיבור ל-Neon: אירועים שמוסיפים נשמרים זמנית ויימחקו. צריך להגדיר DATABASE_URL ב-Render.");
+    }
+    renderNotices(notices);
     $("updated").textContent = "עודכן " + timeOf(data.generatedAt);
   }
 
