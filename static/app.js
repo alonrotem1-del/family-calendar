@@ -544,6 +544,34 @@ function defaultDay() {
   return days.includes(today) ? today : days[0];
 }
 
+/** Fills a 24-hour picker: hours 00-23, minutes in steps of five. */
+function buildClock(id) {
+  const [hours, minutes] = $(id).querySelectorAll("select");
+  const two = (n) => String(n).padStart(2, "0");
+  hours.replaceChildren(...Array.from({ length: 24 }, (_, h) => el("option", { value: two(h) }, two(h))));
+  minutes.replaceChildren(...Array.from({ length: 12 }, (_, i) => el("option", { value: two(i * 5) }, two(i * 5))));
+}
+
+function getClock(id) {
+  const [hours, minutes] = $(id).querySelectorAll("select");
+  return `${hours.value}:${minutes.value}`;
+}
+
+function setClock(id, value) {
+  const [h, m] = value.split(":");
+  const [hours, minutes] = $(id).querySelectorAll("select");
+  // An event edited elsewhere may start at, say, 17:22: keep that minute choosable.
+  if (![...minutes.options].some((o) => o.value === m)) {
+    minutes.append(el("option", { value: m }, m));
+    [...minutes.options].sort((a, b) => a.value - b.value).forEach((o) => minutes.append(o));
+  }
+  hours.value = h;
+  minutes.value = m;
+}
+
+buildClock("ed-start");
+buildClock("ed-end");
+
 function openEditor(event, preset = {}) {
   editing = event || null;
   endTouched = !!event;
@@ -552,8 +580,8 @@ function openEditor(event, preset = {}) {
   $("ed-date").value = event ? (event.allDay ? event.start : zoned(event.start).day) : preset.day || defaultDay();
   $("ed-allday").checked = !!event?.allDay;
   const start = event && !event.allDay ? timeOf(event.start) : preset.start || "17:00";
-  $("ed-start").value = start;
-  $("ed-end").value = event && !event.allDay ? timeOf(event.end) : hourLater(start);
+  setClock("ed-start", start);
+  setClock("ed-end", event && !event.allDay ? timeOf(event.end) : hourLater(start));
   $("ed-location").value = event?.location || "";
   chosen = new Set(event ? event.people : []);
   renderChosen();
@@ -596,11 +624,11 @@ $("editor-form").addEventListener("input", () => ($("ed-error").textContent = ""
 $("ed-people").addEventListener("click", () => ($("ed-error").textContent = ""));
 $("ed-cancel").addEventListener("click", () => $("editor").close());
 $("ed-allday").addEventListener("change", () => ($("ed-times").hidden = $("ed-allday").checked));
-$("ed-end").addEventListener("input", () => (endTouched = true));
-$("ed-start").addEventListener("input", () => {
-  const start = $("ed-start").value;
-  if (start && (!endTouched || minutesOf($("ed-end").value || "00:00") <= minutesOf(start))) {
-    $("ed-end").value = hourLater(start);
+$("ed-end").addEventListener("change", () => (endTouched = true));
+$("ed-start").addEventListener("change", () => {
+  const start = getClock("ed-start");
+  if (!endTouched || minutesOf(getClock("ed-end")) <= minutesOf(start)) {
+    setClock("ed-end", hourLater(start));
   }
 });
 
@@ -612,8 +640,8 @@ $("editor-form").addEventListener("submit", async (e) => {
     people: state.people.map((p) => p.id).filter((id) => chosen.has(id)),
     date,
     allDay: $("ed-allday").checked,
-    start: $("ed-start").value || null,
-    end: $("ed-end").value || null,
+    start: getClock("ed-start"),
+    end: getClock("ed-end"),
     location: $("ed-location").value,
   };
   // Say what's missing here rather than after a round trip.

@@ -427,3 +427,22 @@ button { font: inherit; color: inherit; cursor: pointer; }
   text-align: center;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
 }
+
+/* 24-hour time picker: hour and minutes */
+.clock { display: flex; align-items: center; gap: 4px; color: var(--text); font-weight: 600; }
+.clock select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  text-align-last: center;
+  color: var(--text);
+  padding: 10px 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  -webkit-appearance: none;
+  appearance: none;
+}

@@ -91,8 +91,13 @@
       </label>
       <label class="check"><input id="ed-allday" type="checkbox"> כל היום</label>
       <div id="ed-times" class="ed-times">
-        <label class="field">משעה <input id="ed-start" type="time" step="300" dir="ltr"></label>
-        <label class="field">עד <input id="ed-end" type="time" step="300" dir="ltr"></label>
+        <!-- Our own 24-hour pickers: the phone's time field shows AM/PM in some regions -->
+        <div class="field">משעה
+          <div id="ed-start" class="clock" dir="ltr"><select aria-label="שעה"></select>:<select aria-label="דקות"></select></div>
+        </div>
+        <div class="field">עד
+          <div id="ed-end" class="clock" dir="ltr"><select aria-label="שעה"></select>:<select aria-label="דקות"></select></div>
+        </div>
       </div>
       <label class="field">איפה (לא חובה)
         <input id="ed-location" maxlength="200" autocomplete="off">
