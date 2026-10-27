@@ -3,11 +3,16 @@
 Kept in Postgres when DATABASE_URL is set (Neon's free plan in production),
 otherwise in a local SQLite file. On Neon, DATABASE_URL is the pooled
 connection for everyday queries and DATABASE_URL_UNPOOLED the direct one,
-which Neon recommends for schema changes like creating the table. That file is fine on a laptop, but on
-Render's free plan it is wiped on every restart, so the app warns about it.
+which Neon recommends for schema changes like creating the table.
+
+The SQLite file is fine on a laptop, but on Render's free plan it is wiped on
+every restart, so the app warns about it. If the database can't be reached,
+the rest of the calendar keeps working and says why events can't be saved.
 """
 
+import logging
 import os
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -31,6 +36,18 @@ CREATE TABLE IF NOT EXISTS family_events (
 
 COLUMNS = "id, title, people, start_at, end_at, all_day, location, first_day, last_day, updated_at"
 
+log = logging.getLogger("uvicorn.error")  # shows up in Render's Logs
+
+
+class StoreUnavailable(Exception):
+    """The database can't be reached; the message is shown to the family as is."""
+
+
+def _describe(exc: Exception) -> str:
+    first_line = (str(exc).strip().splitlines() or [type(exc).__name__])[0]
+    # Never echo a password that may be part of a connection string.
+    return re.sub(r"://[^@\s]*@", "://***@", first_line)[:300]
+
 
 class EventStore:
     def __init__(
@@ -40,22 +57,45 @@ class EventStore:
         direct_url: str | None = None,
     ):
         self.database_url = database_url
+        self.direct_url = direct_url
         self.sqlite_path = sqlite_path or Path(os.environ.get("SQLITE_PATH") or "family-events.db")
-        with self._connect(direct_url) as db:
-            db.execute(SCHEMA)
+        self.error: str | None = None
+        self._ready = False
+        self._prepare()
 
     @property
     def durable(self) -> bool:
         return self.database_url is not None
+
+    def _prepare(self) -> None:
+        """Creates the table. A failure is remembered, not raised, so the app still starts."""
+        try:
+            with self._connect(self.direct_url) as db:
+                db.execute(SCHEMA)
+        except Exception as exc:
+            self.error = exc.args[0] if isinstance(exc, StoreUnavailable) else _describe(exc)
+            log.error("Events database unavailable: %s", self.error)
+            return
+        self._ready, self.error = True, None
+
+    def _require(self) -> None:
+        if not self._ready:
+            self._prepare()  # try again: the database may be back, or the setting fixed
+        if not self._ready:
+            raise StoreUnavailable(self.error)
 
     @contextmanager
     def _connect(self, url: str | None = None):
         if self.database_url:
             import psycopg  # only needed in production
 
-            # No server-side prepared statements: through Neon's pooler a later
-            # request may land on a backend that never saw them.
-            with psycopg.connect(url or self.database_url, prepare_threshold=None) as conn:
+            try:
+                # No server-side prepared statements: through Neon's pooler a later
+                # request may land on a backend that never saw them.
+                conn = psycopg.connect(url or self.database_url, prepare_threshold=None)
+            except (psycopg.Error, ValueError) as exc:  # unreachable, bad password, bad URL
+                raise StoreUnavailable(_describe(exc)) from None
+            with conn:
                 yield _Postgres(conn)  # commits on success
         else:
             conn = sqlite3.connect(self.sqlite_path)
@@ -68,6 +108,7 @@ class EventStore:
 
     def between(self, first_day: str, end_day: str) -> list[dict]:
         """Events touching the days [first_day, end_day)."""
+        self._require()
         with self._connect() as db:
             rows = db.execute(
                 f"SELECT {COLUMNS} FROM family_events WHERE first_day < ? AND last_day >= ?",
@@ -76,6 +117,7 @@ class EventStore:
         return [_row(r) for r in rows]
 
     def get(self, event_id: str) -> dict | None:
+        self._require()
         with self._connect() as db:
             row = db.execute(
                 f"SELECT {COLUMNS} FROM family_events WHERE id = ?", (event_id,)
@@ -84,6 +126,7 @@ class EventStore:
 
     def save(self, event: dict, event_id: str | None = None) -> dict:
         """Adds an event, or replaces the one with `event_id`. Returns None if that one is gone."""
+        self._require()
         stored = {
             **event,
             "id": event_id or uuid.uuid4().hex,
@@ -121,6 +164,7 @@ class EventStore:
         return self.get(stored["id"])
 
     def delete(self, event_id: str) -> bool:
+        self._require()
         with self._connect() as db:
             return db.execute("DELETE FROM family_events WHERE id = ?", (event_id,)).rowcount > 0
 

@@ -67,6 +67,15 @@ class Settings:
     database_url_unpooled: str | None = None
 
 
+def database_url(value: str | None) -> str | None:
+    """A connection string as pasted from Neon's Connect window, which by default
+    shows it inside a command: psql 'postgresql://...'. Keep just the URL."""
+    value = (value or "").strip()
+    if value.lower().startswith("psql "):
+        value = value[5:].strip()
+    return value.strip("'\"").strip() or None
+
+
 def normalize_url(url: str) -> str:
     url = url.strip()
     # Outlook and Google both hand out webcal:// links; they are plain HTTPS.
@@ -175,6 +184,6 @@ def load_settings(env=os.environ, family_file: Path | None = None) -> Settings:
         secret_key=secret_key,
         timezone=ZoneInfo((env.get("TIMEZONE") or "Asia/Jerusalem").strip()),
         cache_seconds=int(env.get("CACHE_SECONDS") or 600),
-        database_url=(env.get("DATABASE_URL") or "").strip() or None,
-        database_url_unpooled=(env.get("DATABASE_URL_UNPOOLED") or "").strip() or None,
+        database_url=database_url(env.get("DATABASE_URL")),
+        database_url_unpooled=database_url(env.get("DATABASE_URL_UNPOOLED")),
     )

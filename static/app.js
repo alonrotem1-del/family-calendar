@@ -146,6 +146,7 @@ async function start() {
   partsFormat = null;
   state.people = info.people;
   state.storage = info.storage;
+  state.storageError = info.storageError;
   state.anchor = todayInZone();
   $("login").hidden = true;
   $("app").hidden = false;
@@ -371,7 +372,7 @@ function render() {
       }
     }
     renderNotices(data.errors.map((e) =>
-      `${personById(e.person).name}: ${e.message}` + (e.stale ? " (מוצגת הגרסה האחרונה שנטענה)" : "")));
+      (e.person ? `${personById(e.person).name}: ` : "") + e.message + (e.stale ? " (מוצגת הגרסה האחרונה שנטענה)" : "")));
     $("updated").textContent = "עודכן " + timeOf(data.generatedAt);
   }
 
@@ -546,7 +547,10 @@ function openEditor(event, preset = {}) {
   chosen = new Set(event ? event.people : []);
   renderChosen();
   $("ed-times").hidden = $("ed-allday").checked;
-  $("ed-warning").hidden = state.storage !== "temporary";
+  $("ed-warning").hidden = state.storage === "durable";
+  $("ed-warning").textContent = state.storage === "unavailable"
+    ? `אין חיבור למסד הנתונים, אז ייתכן שהשמירה לא תצליח (${state.storageError}). בדקו את DATABASE_URL ב-Render.`
+    : "האפליקציה עוד לא מחוברת למסד נתונים, ולכן אירועים שמוסיפים יימחקו כשהשרת יופעל מחדש. ההוראות לחיבור נמצאות ב-README.";
   $("ed-error").textContent = "";
   $("editor").showModal();
   if (!event) $("ed-title").focus();

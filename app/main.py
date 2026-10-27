@@ -8,6 +8,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -20,7 +21,7 @@ from .feeds import (
     http_fetch,
     sort_key,
 )
-from .store import EventStore
+from .store import EventStore, StoreUnavailable
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_COOKIE = "fc_session"
@@ -149,7 +150,8 @@ def create_app(
             "timezone": settings.timezone.key,
             "people": [p.public() for p in settings.people],
             # Without a database, added events vanish when Render restarts the app.
-            "storage": "durable" if store.durable else "temporary",
+            "storage": "temporary" if not store.durable else "unavailable" if store.error else "durable",
+            "storageError": store.error,
         }
 
     @app.get("/api/events", dependencies=[Depends(require_session)])
@@ -159,11 +161,14 @@ def create_app(
 
         with_feed = [p for p in settings.people if p.feed_url]
         added, *results = await asyncio.gather(
-            asyncio.to_thread(store.between, start.isoformat(), end.isoformat()),
+            asyncio.to_thread(added_between, start.isoformat(), end.isoformat()),
             *(cache.get(p.feed_url) for p in with_feed),
         )
+        added, store_error = added
         all_events = [to_api(e) for e in added]
         errors = []
+        if store_error:
+            errors.append({"person": None, "message": store_error, "stale": False})
         for person in settings.people:
             all_events.extend(activities_between(person, start, end, settings.timezone))
         for person, result in zip(with_feed, results):
@@ -189,6 +194,19 @@ def create_app(
             "errors": errors,
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
+
+    def added_between(first_day: str, end_day: str) -> tuple[list[dict], str | None]:
+        try:
+            return store.between(first_day, end_day), None
+        except StoreUnavailable as exc:
+            return [], f"אירועים שנוספו באפליקציה לא זמינים כרגע: אין חיבור למסד הנתונים ({exc})"
+
+    @app.exception_handler(StoreUnavailable)
+    async def store_unavailable(request: Request, exc: StoreUnavailable):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"אי אפשר לשמור כרגע: אין חיבור למסד הנתונים ({exc})"},
+        )
 
     @app.post("/api/events", dependencies=[Depends(require_session)])
     def add_event(body: FamilyEvent):

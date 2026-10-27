@@ -404,3 +404,49 @@ def test_events_survive_in_postgres(family_file, postgres_url):
     again = EventStore(postgres_url)
     assert [(e["title"], e["people"]) for e in again.between("2026-10-25", "2026-11-01")] == [("אסיפה", ["aba", "leo"])]
     assert again.delete(event["id"]) and again.between("2026-10-25", "2026-11-01") == []
+
+
+# ---- When the database is missing or misconfigured --------------------------
+
+def test_database_url_pasted_as_psql_command_is_cleaned():
+    from app.config import database_url
+
+    url = "postgresql://u:pw@ep-x-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+    assert database_url(f"psql '{url}'") == url
+    assert database_url(f'  "{url}"\n') == url
+    assert database_url(url) == url
+    assert database_url("  ") is None
+
+
+@pytest.mark.parametrize("bad_url", [
+    "postgresql://family:secretpw@127.0.0.1:1/neondb?connect_timeout=2",  # nothing listening
+    "this is not a url secretpw",
+])
+def test_calendar_keeps_working_without_the_database(family_file, bad_url):
+    settings = load_settings({**ENV, "DATABASE_URL": bad_url}, family_file)
+
+    async def fetch(url):
+        return FEEDS[url]
+
+    client = signed_in(TestClient(create_app(settings, fetch=fetch)))
+    people = client.get("/api/people").json()
+    assert people["storage"] == "unavailable" and people["storageError"]
+
+    data = week(client)
+    assert {e["people"][0] for e in data["events"]} == {"aba", "kids", "leo"}  # the rest still shows
+    assert [e["person"] for e in data["errors"]] == [None]
+    assert "מסד הנתונים" in data["errors"][0]["message"]
+
+    refused = client.post("/api/events", json=PARENTS_EVENING)
+    assert refused.status_code == 503 and "מסד הנתונים" in refused.json()["detail"]
+    for text in (str(people), str(data), refused.text):
+        assert "secretpw" not in text
+
+
+def test_saving_recovers_once_the_database_is_back(tmp_path):
+    folder = tmp_path / "not-yet"
+    store = EventStore(sqlite_path=folder / "events.db")  # the folder doesn't exist: fails
+    assert store.error
+    folder.mkdir()
+    assert store.between("2026-10-25", "2026-11-01") == []  # retried and recovered
+    assert store.error is None
