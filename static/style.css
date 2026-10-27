@@ -410,3 +410,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ed-people .chip { font-size: .95rem; padding: 6px 12px; }
 .ed-people .chip.everyone { --c: var(--muted); }
 .editor .notice { margin: 0 0 8px; }
+
+/* A short confirmation after saving */
+.toast {
+  position: fixed;
+  inset-inline: 16px;
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  z-index: 11;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #111827;
+  color: #fff;
+  font-size: .95rem;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
+}

@@ -481,19 +481,30 @@ function showDetails(event) {
     openEditor(event);
   };
   $("details-delete").onclick = () => deleteEvent(event);
+  $("details-when").textContent = whenText(event);
+  $("details-where").textContent = event.location ? "📍 " + event.location : "";
+  dialog.showModal();
+}
+
+/** "יום רביעי, 28.10 · 18:30–19:30", or "· כל היום" for an all-day event. */
+function whenText(event) {
   const dateFmt = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "numeric", timeZone: "UTC" });
   if (event.allDay) {
     const last = addDays(event.end, -1);
-    $("details-when").textContent = last > event.start
+    return last > event.start
       ? `${dateFmt.format(utcDate(event.start))} – ${dateFmt.format(utcDate(last))} · כל היום`
       : `${dateFmt.format(utcDate(event.start))} · כל היום`;
-  } else {
-    $("details-when").textContent =
-      // Isolated left-to-right, or Hebrew text around it shows 10:00–09:00.
-      `${dateFmt.format(utcDate(zoned(event.start).day))} · \u2066${timeOf(event.start)}–${timeOf(event.end)}\u2069`;
   }
-  $("details-where").textContent = event.location ? "📍 " + event.location : "";
-  dialog.showModal();
+  // Isolated left-to-right, or Hebrew text around it shows 10:00–09:00.
+  return `${dateFmt.format(utcDate(zoned(event.start).day))} · \u2066${timeOf(event.start)}–${timeOf(event.end)}\u2069`;
+}
+
+let toastTimer;
+function toast(message, ms = 4000) {
+  $("toast").textContent = message;
+  $("toast").hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ($("toast").hidden = true), ms);
 }
 
 /** A tap outside the card closes it; a tap on the card's own padding does not. */
@@ -616,15 +627,24 @@ $("editor-form").addEventListener("submit", async (e) => {
   const save = $("editor-form").querySelector("[type=submit]");
   save.disabled = true;
   try {
-    await api(editing ? `/api/events/${editing.id}` : "/api/events", {
+    const saved = await api(editing ? `/api/events/${editing.id}` : "/api/events", {
       method: editing ? "PUT" : "POST",
       body: JSON.stringify(body),
     });
     $("editor").close();
-    // Show the week (or day) the event is on.
+    // Show the day the event is on. Friday and Saturday aren't in the work week,
+    // so an event on them switches to the full week rather than staying hidden.
+    if (state.view === "workweek" && utcDate(date).getUTCDay() >= 5) {
+      state.view = "week";
+      store("view", "week");
+    }
     if (state.view === "day" || !visibleDays().includes(date)) state.anchor = date;
     render();
     await load();
+    const shown = state.weeks.get(sundayOf(date))?.events.some((e) => e.id === saved.id);
+    toast(shown
+      ? `נשמר: ${saved.title} · ${whenText(saved)}`
+      : "האירוע נשמר, אבל השרת לא החזיר אותו ביומן. שלחו צילום מסך של המסך הזה.", shown ? 4000 : 10000);
   } catch (error) {
     if (error.message !== "unauthenticated") $("ed-error").textContent = error.message;
   } finally {

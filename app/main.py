@@ -3,7 +3,9 @@
 import asyncio
 import hashlib
 import hmac
+import os
 import re
+from urllib.parse import urlsplit
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
@@ -85,6 +87,16 @@ def to_stored(body: FamilyEvent, settings: Settings) -> dict:
     }
 
 
+def same_database(pooled: str | None, direct: str | None) -> bool | None:
+    """Whether Neon's pooled and direct URLs lead to the same database. If not, the
+    table is created in one database and events are saved in another."""
+    if not pooled or not direct:
+        return None
+    a, b = urlsplit(pooled), urlsplit(direct)
+    host = lambda u: (u.hostname or "").replace("-pooler", "")
+    return host(a) == host(b) and a.path == b.path
+
+
 def to_api(stored: dict) -> dict:
     return {
         key: stored[key] for key in ("id", "title", "people", "start", "end", "allDay", "location")
@@ -150,7 +162,7 @@ def create_app(
             "timezone": settings.timezone.key,
             "people": [p.public() for p in settings.people],
             # Without a database, added events vanish when Render restarts the app.
-            "storage": "temporary" if not store.durable else "unavailable" if store.error else "durable",
+            "storage": storage_kind(),
             "storageError": store.error,
         }
 
@@ -225,9 +237,25 @@ def create_app(
             raise HTTPException(status_code=404, detail="האירוע כבר לא קיים")
         return {"deleted": True}
 
+    def storage_kind() -> str:
+        return "temporary" if not store.durable else "unavailable" if store.error else "durable"
+
     @app.get("/api/health")
-    def health():
-        return {"ok": True}
+    def health(db: bool = False):
+        """Public, and says nothing private: which version runs and whether saving works.
+        /api/health?db=1 also tries the database (left out of Render's frequent checks,
+        so Neon can still suspend when idle)."""
+        if db and store.durable:
+            try:
+                store.between("1900-01-01", "1900-01-02")
+            except StoreUnavailable:
+                pass
+        return {
+            "ok": True,
+            "version": (os.environ.get("RENDER_GIT_COMMIT") or "local")[:7],
+            "storage": storage_kind(),
+            "sameDatabase": same_database(settings.database_url, settings.database_url_unpooled),
+        }
 
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app

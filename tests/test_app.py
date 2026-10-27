@@ -450,3 +450,21 @@ def test_saving_recovers_once_the_database_is_back(tmp_path):
     folder.mkdir()
     assert store.between("2026-10-25", "2026-11-01") == []  # retried and recovered
     assert store.error is None
+
+
+def test_health_is_public_and_says_nothing_private(family_file):
+    client = make_client(family_file)
+    body = client.get("/api/health").json()
+    assert body == {"ok": True, "version": "local", "storage": "temporary", "sameDatabase": None}
+    assert client.get("/api/health?db=1").status_code == 200
+
+
+def test_pooled_and_direct_urls_are_compared():
+    from app.main import same_database
+
+    pooled = "postgresql://u:p@ep-cool-1-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+    direct = "postgresql://u:p@ep-cool-1.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+    assert same_database(pooled, direct) is True
+    assert same_database(pooled, direct.replace("ep-cool-1", "ep-other-2")) is False
+    assert same_database(pooled, direct.replace("/neondb", "/other")) is False
+    assert same_database(pooled, None) is None
