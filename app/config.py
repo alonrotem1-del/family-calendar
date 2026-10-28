@@ -43,6 +43,18 @@ class Activity:
 
 
 @dataclass(frozen=True)
+class Lesson:
+    """One lesson in a child's school timetable, e.g. 08:00-08:45 מתמטיקה."""
+
+    start: time
+    end: time
+    subject: str
+
+    def public(self) -> dict:
+        return {"start": self.start.strftime("%H:%M"), "end": self.end.strftime("%H:%M"), "subject": self.subject}
+
+
+@dataclass(frozen=True)
 class Person:
     id: str
     name: str
@@ -50,6 +62,8 @@ class Person:
     feed_url: str | None = None
     private: bool = False
     activities: tuple[Activity, ...] = field(default_factory=tuple)
+    # School timetable: day of the week (0 = Sunday, as in JavaScript) -> lessons.
+    school: dict[int, tuple[Lesson, ...]] = field(default_factory=dict)
 
     def public(self) -> dict:
         """What the browser may see: never the feed URL, which is a secret."""
@@ -141,6 +155,31 @@ def _activity(raw: dict, where: str) -> Activity:
     )
 
 
+def _school(raw, where: str) -> dict[int, tuple[Lesson, ...]]:
+    """ראשון: ["08:00-08:45 מתמטיקה", ...] for each school day."""
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}: מערכת השעות צריכה להיות רשימה לפי ימים (ראשון:, שני:, …)")
+    days = {}
+    for day_name, lessons in raw.items():
+        name = str(day_name).strip().removeprefix("יום").strip()
+        if name not in HEBREW_DAYS:
+            raise ConfigError(f"{where}: יום לא מוכר '{day_name}' (ראשון, שני, … שבת)")
+        day = (HEBREW_DAYS[name] + 1) % 7  # Python's Monday-first to Sunday-first
+        parsed = []
+        for lesson in lessons or []:
+            match = re.fullmatch(r"\s*(\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2})\s+(.+?)\s*", str(lesson))
+            if not match:
+                raise ConfigError(
+                    f'{where}, יום {name}: שיעור לא תקין {lesson!r} (צריך להיות "08:00-08:45 מתמטיקה")'
+                )
+            start, end = _hours(match[1], f"{where}, יום {name}")
+            parsed.append(Lesson(start=start, end=end, subject=match[2]))
+        days[day] = tuple(sorted(parsed, key=lambda l: l.start))
+    return days
+
+
 def load_people(path: Path = DEFAULT_FAMILY_FILE, env=os.environ) -> tuple[Person, ...]:
     try:
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
@@ -166,6 +205,7 @@ def load_people(path: Path = DEFAULT_FAMILY_FILE, env=os.environ) -> tuple[Perso
                     _activity(a or {}, f"family.yaml, {name}")
                     for a in raw.get("activities") or []
                 ),
+                school=_school(raw.get("school"), f"family.yaml, {name}, מערכת שעות"),
             )
         )
     return tuple(people)

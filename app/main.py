@@ -166,6 +166,19 @@ def create_app(
             "storageError": store.error,
         }
 
+    @app.get("/api/school", dependencies=[Depends(require_session)])
+    def school():
+        """The children's school timetables, for the second tab."""
+        return {
+            "kids": [
+                p.public() | {
+                    "days": {str(day): [l.public() for l in lessons] for day, lessons in p.school.items()}
+                }
+                for p in settings.people
+                if p.school
+            ]
+        }
+
     @app.get("/api/events", dependencies=[Depends(require_session)])
     async def events(start: date, end: date):
         if end <= start or end - start > timedelta(days=MAX_RANGE_DAYS):

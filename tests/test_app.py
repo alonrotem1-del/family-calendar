@@ -468,3 +468,46 @@ def test_pooled_and_direct_urls_are_compared():
     assert same_database(pooled, direct.replace("ep-cool-1", "ep-other-2")) is False
     assert same_database(pooled, direct.replace("/neondb", "/other")) is False
     assert same_database(pooled, None) is None
+
+
+# ---- School timetable --------------------------------------------------------
+
+def test_school_timetable(tmp_path):
+    path = tmp_path / "family.yaml"
+    path.write_text("""
+people:
+  - id: aba
+    name: Dad
+  - id: leo
+    name: Leo
+    school:
+      ראשון:
+        - "08:45-09:30 אנגלית"
+        - 08:00-08:45 מתמטיקה
+      יום חמישי:
+        - "08:00-09:30 ספורט"
+""", encoding="utf-8")
+    client = signed_in(make_client(path))
+    kids = client.get("/api/school").json()["kids"]
+    assert [k["id"] for k in kids] == ["leo"]  # Dad has no timetable
+    assert kids[0]["days"] == {
+        "0": [  # Sunday, sorted by time
+            {"start": "08:00", "end": "08:45", "subject": "מתמטיקה"},
+            {"start": "08:45", "end": "09:30", "subject": "אנגלית"},
+        ],
+        "4": [{"start": "08:00", "end": "09:30", "subject": "ספורט"}],  # Thursday
+    }
+    assert make_client(path).get("/api/school").status_code == 401
+
+
+@pytest.mark.parametrize("school, message", [
+    ('{Monday: ["08:00-08:45 x"]}', "יום לא מוכר"),
+    ('{ראשון: ["מתמטיקה"]}', "שיעור לא תקין"),
+    ('{ראשון: ["09:00-08:00 x"]}', "שעת הסיום"),
+    ('["08:00-08:45 x"]', "לפי ימים"),
+])
+def test_school_mistakes_are_explained(tmp_path, school, message):
+    path = tmp_path / "family.yaml"
+    path.write_text(f"people:\n  - id: leo\n    school: {school}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match=message):
+        load_people(path, {})

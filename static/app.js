@@ -153,6 +153,7 @@ async function start() {
   renderFilters();
   render();
   focusAfternoon();
+  showTab(readStored("tab", "calendar"));
   await load();
 }
 
@@ -195,7 +196,7 @@ $("today").addEventListener("click", () => {
   focusAfternoon();
 });
 $("refresh").addEventListener("click", () => load());
-for (const button of document.querySelectorAll(".view-toggle button")) {
+for (const button of document.querySelectorAll("#cal-views button")) {
   button.addEventListener("click", () => setView(button.dataset.view));
 }
 
@@ -229,7 +230,11 @@ function focusAfternoon() {
   $("scroller").scrollTop = FOCUS_START * hourPx;
 }
 
-window.addEventListener("resize", () => !$("app").hidden && fitHours());
+window.addEventListener("resize", () => {
+  if ($("app").hidden) return;
+  if (!$("calendar-tab").hidden) fitHours();
+  if (!$("school-tab").hidden) renderSchool();
+});
 
 // ---- Rendering ------------------------------------------------------------
 
@@ -297,7 +302,7 @@ function renderRange() {
   $("range").textContent = text;
   $("prev").setAttribute("aria-label", state.view === "day" ? "היום הקודם" : "השבוע הקודם");
   $("next").setAttribute("aria-label", state.view === "day" ? "היום הבא" : "השבוע הבא");
-  for (const button of document.querySelectorAll(".view-toggle button")) {
+  for (const button of document.querySelectorAll("#cal-views button")) {
     button.setAttribute("aria-pressed", String(button.dataset.view === state.view));
   }
 }
@@ -697,6 +702,186 @@ async function deleteEvent(event) {
 }
 
 closeOnOutsideTap($("editor"));
+
+// ---- Tabs and the school timetable -----------------------------------------
+
+const school = {
+  kids: [],
+  loaded: false,
+  view: readStored("schoolView", "week") === "day" ? "day" : "week",
+  kid: readStored("schoolKid", null), // whose week is shown
+  day: null, // the day shown in day view: 0 = Sunday
+};
+
+// Soft colors for subjects; the same subject always gets the same one.
+const SUBJECT_COLORS = ["#2563eb", "#db2777", "#16a34a", "#ea580c", "#7c3aed", "#0891b2", "#ca8a04", "#dc2626", "#4f46e5", "#0d9488", "#c026d3", "#65a30d"];
+function subjectColor(subject) {
+  let hash = 0;
+  for (const ch of subject.trim()) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  return SUBJECT_COLORS[hash % SUBJECT_COLORS.length];
+}
+
+function showTab(tab) {
+  tab = tab === "school" ? "school" : "calendar";
+  store("tab", tab);
+  $("calendar-tab").hidden = tab !== "calendar";
+  $("school-tab").hidden = tab !== "school";
+  $("add").hidden = tab !== "calendar";
+  for (const button of document.querySelectorAll(".tabbar button")) {
+    button.setAttribute("aria-selected", String(button.dataset.tab === tab));
+  }
+  if (tab === "calendar") fitHours();
+  else if (school.loaded) renderSchool();
+  else loadSchool();
+}
+
+for (const button of document.querySelectorAll(".tabbar button")) {
+  button.addEventListener("click", () => showTab(button.dataset.tab));
+}
+
+async function loadSchool() {
+  try {
+    school.kids = (await api("/api/school")).kids;
+    school.loaded = true;
+    renderSchool(true);
+  } catch (error) {
+    if (error.message !== "unauthenticated") {
+      $("school-body").replaceChildren(el("div", { className: "school-empty" }, error.message));
+    }
+  }
+}
+
+/** School days: Sunday to Thursday, plus Friday or Saturday if anyone studies then. */
+function schoolDays() {
+  const used = new Set(school.kids.flatMap((k) => Object.keys(k.days).map(Number)));
+  return [0, 1, 2, 3, 4, 5, 6].filter((d) => d <= 4 || used.has(d));
+}
+
+/** Today if it's a school day, else the next one (on Friday: Sunday). */
+function defaultSchoolDay() {
+  const today = utcDate(todayInZone()).getUTCDay();
+  const days = schoolDays();
+  return days.includes(today) ? today : days.find((d) => d > today) ?? days[0];
+}
+
+function stepSchoolDay(direction) {
+  const days = schoolDays();
+  const i = days.indexOf(school.day);
+  school.day = days[(i + direction + days.length) % days.length];
+  renderSchool();
+}
+
+$("school-prev").addEventListener("click", () => stepSchoolDay(-1));
+$("school-next").addEventListener("click", () => stepSchoolDay(1));
+$("school-today").addEventListener("click", () => {
+  school.day = defaultSchoolDay();
+  renderSchool();
+});
+for (const button of document.querySelectorAll("#school-views button")) {
+  button.addEventListener("click", () => {
+    school.view = button.dataset.view;
+    store("schoolView", school.view);
+    renderSchool();
+  });
+}
+
+const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+const DAY_LETTERS = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+
+function renderSchool(firstTime = false) {
+  const kids = school.kids;
+  if (!school.kids.some((k) => k.id === school.kid)) school.kid = kids[0]?.id ?? null;
+  if (school.day === null) school.day = defaultSchoolDay();
+  const isDay = school.view === "day";
+  const kid = kids.find((k) => k.id === school.kid);
+  const days = schoolDays();
+  const today = utcDate(todayInZone()).getUTCDay();
+
+  for (const button of document.querySelectorAll("#school-views button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.view === school.view));
+  }
+  $("school-nav").hidden = !isDay;
+  $("school-kids").hidden = isDay || kids.length < 2;
+  $("school-title").textContent = isDay ? `יום ${DAY_NAMES[school.day]}` : kid ? `מערכת שעות · ${kid.name}` : "מערכת שעות";
+
+  // Week view: pick one child.
+  $("school-kids").replaceChildren(...kids.map((k) => {
+    const chip = el("button", { type: "button", className: "chip", "--c": k.color, "aria-pressed": String(k.id === school.kid) }, k.name);
+    chip.addEventListener("click", () => {
+      school.kid = k.id;
+      store("schoolKid", k.id);
+      renderSchool();
+    });
+    return chip;
+  }));
+
+  const scroller = $("school-scroller");
+  if (!kids.length) {
+    scroller.style.setProperty("--days", 1);
+    $("school-head").replaceChildren();
+    $("school-body").replaceChildren(el("div", { className: "school-empty" }, "עוד לא הוכנסה מערכת שעות."));
+    return;
+  }
+
+  // Columns: the days of one child's week, or every child on one day.
+  const columns = isDay
+    ? kids.map((k) => ({ key: k.id, lessons: k.days[school.day] || [], label: el("div", { className: "kid-label" }, [el("span", { className: "dot", "--c": k.color }), k.name]), kid: k, day: school.day }))
+    : days.map((d) => ({
+        key: d,
+        lessons: kid.days[d] || [],
+        label: el("div", { className: "day-label" + (d === today ? " is-today" : "") }, [el("span", { className: "num" }, DAY_LETTERS[d])]),
+        kid,
+        day: d,
+        today: d === today,
+      }));
+  scroller.style.setProperty("--days", columns.length);
+  $("school-head").replaceChildren(el("div", { className: "cal-row" }, [el("div"), ...columns.map((c) => c.label)]));
+
+  // Hours: from the earliest lesson to the latest, across all children, so both views line up.
+  const all = kids.flatMap((k) => Object.values(k.days).flat());
+  const first = Math.floor(Math.min(...all.map((l) => minutesOf(l.start))) / 60);
+  const last = Math.ceil(Math.max(...all.map((l) => minutesOf(l.end))) / 60);
+  const span = Math.max(1, last - first);
+  const visible = scroller.clientHeight - $("school-head").offsetHeight;
+  const hour = Math.round(Math.min(140, Math.max(44, visible > 0 ? visible / span : 80)));
+  scroller.style.setProperty("--hour", hour + "px");
+
+  const body = $("school-body");
+  body.style.height = `calc(var(--hour) * ${span})`;
+  const axis = el("div", { className: "axis" });
+  for (let h = first + 1; h < last; h++) {
+    axis.append(el("span", { style: { top: `calc(var(--hour) * ${h - first})` } }, `${String(h).padStart(2, "0")}:00`));
+  }
+  body.replaceChildren(axis, ...columns.map((c) => {
+    const col = el("div", { className: "day-col" + (c.today ? " is-today" : "") });
+    const items = c.lessons.map((l) => ({ lesson: l, start: minutesOf(l.start) - first * 60, end: minutesOf(l.end) - first * 60 }));
+    for (const item of arrange(items)) {
+      const color = subjectColor(item.lesson.subject);
+      const box = el("button", { type: "button", className: "event", "--c": color, "--stripe": color }, [
+        el("span", { className: "title" }, item.lesson.subject),
+      ]);
+      Object.assign(box.style, {
+        top: `calc(var(--hour) * ${item.start / 60})`,
+        height: `calc(var(--hour) * ${(item.shownEnd - item.start) / 60} - 2px)`,
+        insetInlineStart: `calc(${(item.col * 100) / item.cols}% + 2px)`,
+        width: `calc(${100 / item.cols}% - 4px)`,
+      });
+      box.addEventListener("click", () => showLesson(c.kid, c.day, item.lesson));
+      col.append(box);
+    }
+    return col;
+  }));
+  if (firstTime) scroller.scrollTop = 0;
+}
+
+function showLesson(kid, day, lesson) {
+  $("details-person").replaceChildren(el("span", { className: "dot", "--c": kid.color }), el("span", { className: "name" }, kid.name));
+  $("details-title").textContent = lesson.subject;
+  $("details-when").textContent = `יום ${DAY_NAMES[day]} · \u2066${lesson.start}–${lesson.end}\u2069`;
+  $("details-where").textContent = "";
+  $("details-actions").hidden = true;
+  $("details").showModal();
+}
 
 // ---- Boot -----------------------------------------------------------------
 

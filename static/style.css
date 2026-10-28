@@ -364,7 +364,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .fab {
   position: fixed;
   inset-inline-end: 20px;
-  bottom: calc(20px + env(safe-area-inset-bottom));
+  bottom: calc(76px + env(safe-area-inset-bottom)); /* above the tab bar */
   z-index: 10;
   width: 56px;
   height: 56px;
@@ -415,7 +415,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .toast {
   position: fixed;
   inset-inline: 16px;
-  bottom: calc(88px + env(safe-area-inset-bottom));
+  bottom: calc(146px + env(safe-area-inset-bottom));
   z-index: 11;
   max-width: 480px;
   margin: 0 auto;
@@ -446,3 +446,34 @@ button { font: inherit; color: inherit; cursor: pointer; }
   -webkit-appearance: none;
   appearance: none;
 }
+
+/* Two tabs: calendar and school timetable */
+.tab-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tabbar {
+  display: flex;
+  margin: 0 -12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tabbar button {
+  flex: 1;
+  border: 0;
+  background: none;
+  padding: 7px 0 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  font-size: .78rem;
+  color: var(--muted);
+}
+.tabbar .icon { font-size: 1.35rem; line-height: 1.2; }
+.tabbar button[aria-selected=true] { color: var(--accent); font-weight: 600; }
+.tabbar button[aria-selected=false] .icon { filter: grayscale(1); opacity: .7; }
+
+/* In the timetable a lesson box carries just the subject */
+#school-body .event .title { font-weight: 600; }
+.kid-label { font-weight: 600; color: var(--text); padding: 10px 2px; text-align: center; font-size: .95rem; }
+.kid-label .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c); margin-inline-end: 5px; }
+.school-empty { padding: 32px 16px; text-align: center; color: var(--muted); grid-column: 1 / -1; }
