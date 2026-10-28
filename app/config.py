@@ -49,9 +49,15 @@ class Lesson:
     start: time
     end: time
     subject: str
+    period: int | None = None  # "שיעור 3", when the timetable is given by period
 
     def public(self) -> dict:
-        return {"start": self.start.strftime("%H:%M"), "end": self.end.strftime("%H:%M"), "subject": self.subject}
+        return {
+            "start": self.start.strftime("%H:%M"),
+            "end": self.end.strftime("%H:%M"),
+            "subject": self.subject,
+            "period": self.period,
+        }
 
 
 @dataclass(frozen=True)
@@ -155,8 +161,26 @@ def _activity(raw: dict, where: str) -> Activity:
     )
 
 
-def _school(raw, where: str) -> dict[int, tuple[Lesson, ...]]:
-    """ראשון: ["08:00-08:45 מתמטיקה", ...] for each school day."""
+def _bells(raw, where: str) -> dict[int, tuple[time, time]]:
+    """The school's bell times: period number -> "08:00-08:45"."""
+    if not raw:
+        return {}
+    items = raw.items() if isinstance(raw, dict) else enumerate(raw, start=1)
+    bells = {}
+    for period, hours in items:
+        try:
+            number = int(period)
+        except (TypeError, ValueError):
+            raise ConfigError(f"{where}: מספר שיעור לא תקין '{period}'") from None
+        bells[number] = _hours(hours, f"{where}, שיעור {number}")
+    return bells
+
+
+def _school(raw, where: str, bells: dict[int, tuple[time, time]] | None = None) -> dict[int, tuple[Lesson, ...]]:
+    """For each school day, the lessons in order. Either with their own hours,
+    "08:00-08:45 מתמטיקה", or just the subject, timed by the bell schedule
+    from its place in the list (the first is period 1). An empty entry is a
+    free period."""
     if not raw:
         return {}
     if not isinstance(raw, dict):
@@ -168,14 +192,26 @@ def _school(raw, where: str) -> dict[int, tuple[Lesson, ...]]:
             raise ConfigError(f"{where}: יום לא מוכר '{day_name}' (ראשון, שני, … שבת)")
         day = (HEBREW_DAYS[name] + 1) % 7  # Python's Monday-first to Sunday-first
         parsed = []
-        for lesson in lessons or []:
-            match = re.fullmatch(r"\s*(\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2})\s+(.+?)\s*", str(lesson))
-            if not match:
+        for period, lesson in enumerate(lessons or [], start=1):
+            text = str(lesson or "").strip()
+            if not text or text == "-":
+                continue  # a free period
+            match = re.fullmatch(r"(\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2})\s+(.+)", text)
+            if match:
+                start, end = _hours(match[1], f"{where}, יום {name}")
+                parsed.append(Lesson(start=start, end=end, subject=match[2].strip()))
+            elif re.match(r"\d{1,2}:\d{2}", text):
                 raise ConfigError(
                     f'{where}, יום {name}: שיעור לא תקין {lesson!r} (צריך להיות "08:00-08:45 מתמטיקה")'
                 )
-            start, end = _hours(match[1], f"{where}, יום {name}")
-            parsed.append(Lesson(start=start, end=end, subject=match[2]))
+            elif bells and period in bells:
+                start, end = bells[period]
+                parsed.append(Lesson(start=start, end=end, subject=text, period=period))
+            else:
+                raise ConfigError(
+                    f"{where}, יום {name}: אין שעות לשיעור {period} ({text}). "
+                    'צריך להוסיף אותו ל-school_bells, או לכתוב את השעות: "08:00-08:45 מתמטיקה"'
+                )
         days[day] = tuple(sorted(parsed, key=lambda l: l.start))
     return days
 
@@ -185,6 +221,7 @@ def load_people(path: Path = DEFAULT_FAMILY_FILE, env=os.environ) -> tuple[Perso
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, ValueError) as exc:  # ValueError: e.g. a 13th month
         raise ConfigError(f"family.yaml: הקובץ לא תקין: {exc}") from None
+    school_bells = _bells(data.get("school_bells"), "family.yaml, school_bells")
     people, seen = [], set()
     for i, raw in enumerate(data.get("people") or []):
         pid = str(raw.get("id") or "").strip().lower()
@@ -205,7 +242,12 @@ def load_people(path: Path = DEFAULT_FAMILY_FILE, env=os.environ) -> tuple[Perso
                     _activity(a or {}, f"family.yaml, {name}")
                     for a in raw.get("activities") or []
                 ),
-                school=_school(raw.get("school"), f"family.yaml, {name}, מערכת שעות"),
+                school=_school(
+                    raw.get("school"),
+                    f"family.yaml, {name}, מערכת שעות",
+                    # A child at another school can have bells of their own.
+                    _bells(raw.get("bells"), f"family.yaml, {name}, bells") or school_bells,
+                ),
             )
         )
     return tuple(people)

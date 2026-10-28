@@ -877,7 +877,8 @@ function renderSchool(firstTime = false) {
 function showLesson(kid, day, lesson) {
   $("details-person").replaceChildren(el("span", { className: "dot", "--c": kid.color }), el("span", { className: "name" }, kid.name));
   $("details-title").textContent = lesson.subject;
-  $("details-when").textContent = `יום ${DAY_NAMES[day]} · \u2066${lesson.start}–${lesson.end}\u2069`;
+  const period = lesson.period ? ` · שיעור ${lesson.period}` : "";
+  $("details-when").textContent = `יום ${DAY_NAMES[day]}${period} · \u2066${lesson.start}–${lesson.end}\u2069`;
   $("details-where").textContent = "";
   $("details-actions").hidden = true;
   $("details").showModal();
