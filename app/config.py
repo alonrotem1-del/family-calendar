@@ -44,19 +44,23 @@ class Activity:
 
 @dataclass(frozen=True)
 class Lesson:
-    """One lesson in a child's school timetable, e.g. 08:00-08:45 מתמטיקה."""
+    """One lesson in a child's school timetable: by period ("שיעור 3"), by
+    hours (08:00-08:45), or both when the school's bell times are given."""
 
-    start: time
-    end: time
     subject: str
-    period: int | None = None  # "שיעור 3", when the timetable is given by period
+    teacher: str = ""
+    period: int | None = None
+    start: time | None = None
+    end: time | None = None
 
     def public(self) -> dict:
+        clock = lambda t: t.strftime("%H:%M") if t else None
         return {
-            "start": self.start.strftime("%H:%M"),
-            "end": self.end.strftime("%H:%M"),
             "subject": self.subject,
+            "teacher": self.teacher,
             "period": self.period,
+            "start": clock(self.start),
+            "end": clock(self.end),
         }
 
 
@@ -177,10 +181,10 @@ def _bells(raw, where: str) -> dict[int, tuple[time, time]]:
 
 
 def _school(raw, where: str, bells: dict[int, tuple[time, time]] | None = None) -> dict[int, tuple[Lesson, ...]]:
-    """For each school day, the lessons in order. Either with their own hours,
-    "08:00-08:45 מתמטיקה", or just the subject, timed by the bell schedule
-    from its place in the list (the first is period 1). An empty entry is a
-    free period."""
+    """For each school day, the lessons in period order (the first is period 1;
+    an empty entry is a free period): "אומנות (ענת)" is the subject and its
+    teacher. Hours are optional: from the bell schedule if there is one, or
+    written on the lesson, "08:00-08:45 מתמטיקה"."""
     if not raw:
         return {}
     if not isinstance(raw, dict):
@@ -196,23 +200,23 @@ def _school(raw, where: str, bells: dict[int, tuple[time, time]] | None = None) 
             text = str(lesson or "").strip()
             if not text or text == "-":
                 continue  # a free period
+            start = end = None
             match = re.fullmatch(r"(\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2})\s+(.+)", text)
             if match:
                 start, end = _hours(match[1], f"{where}, יום {name}")
-                parsed.append(Lesson(start=start, end=end, subject=match[2].strip()))
+                text = match[2].strip()
             elif re.match(r"\d{1,2}:\d{2}", text):
                 raise ConfigError(
                     f'{where}, יום {name}: שיעור לא תקין {lesson!r} (צריך להיות "08:00-08:45 מתמטיקה")'
                 )
             elif bells and period in bells:
                 start, end = bells[period]
-                parsed.append(Lesson(start=start, end=end, subject=text, period=period))
-            else:
-                raise ConfigError(
-                    f"{where}, יום {name}: אין שעות לשיעור {period} ({text}). "
-                    'צריך להוסיף אותו ל-school_bells, או לכתוב את השעות: "08:00-08:45 מתמטיקה"'
-                )
-        days[day] = tuple(sorted(parsed, key=lambda l: l.start))
+            teacher = ""
+            with_teacher = re.fullmatch(r"(.+?)\s*\(([^()]+)\)", text)
+            if with_teacher:
+                text, teacher = with_teacher[1].strip(), with_teacher[2].strip()
+            parsed.append(Lesson(subject=text, teacher=teacher, period=period, start=start, end=end))
+        days[day] = tuple(parsed)
     return days
 
 

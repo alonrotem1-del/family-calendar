@@ -491,18 +491,18 @@ people:
     kids = client.get("/api/school").json()["kids"]
     assert [k["id"] for k in kids] == ["leo"]  # Dad has no timetable
     assert kids[0]["days"] == {
-        "0": [  # Sunday, sorted by time
-            {"start": "08:00", "end": "08:45", "subject": "מתמטיקה", "period": None},
-            {"start": "08:45", "end": "09:30", "subject": "אנגלית", "period": None},
+        "0": [  # Sunday
+            # Listed in the order given: these hours are out of order on purpose.
+            {"subject": "אנגלית", "teacher": "", "period": 1, "start": "08:45", "end": "09:30"},
+            {"subject": "מתמטיקה", "teacher": "", "period": 2, "start": "08:00", "end": "08:45"},
         ],
-        "4": [{"start": "08:00", "end": "09:30", "subject": "ספורט", "period": None}],  # Thursday
+        "4": [{"subject": "ספורט", "teacher": "", "period": 1, "start": "08:00", "end": "09:30"}],
     }
     assert make_client(path).get("/api/school").status_code == 401
 
 
 @pytest.mark.parametrize("school, message", [
     ('{Monday: ["08:00-08:45 x"]}', "יום לא מוכר"),
-    ('{ראשון: ["מתמטיקה"]}', "אין שעות לשיעור 1"),  # by period, but no bell times
     ('{ראשון: ["8:00 מתמטיקה"]}', "שיעור לא תקין"),
     ('{ראשון: ["09:00-08:00 x"]}', "שעת הסיום"),
     ('["08:00-08:45 x"]', "לפי ימים"),
@@ -533,18 +533,22 @@ people:
 """, encoding="utf-8")
     kids = {k["id"]: k["days"] for k in signed_in(make_client(path)).get("/api/school").json()["kids"]}
     assert kids["romi"]["0"] == [
-        {"start": "08:00", "end": "08:45", "subject": "שפה", "period": 1},
-        {"start": "09:50", "end": "10:35", "subject": "מדעים", "period": 3},  # period 2 is free
+        {"subject": "שפה", "teacher": "", "period": 1, "start": "08:00", "end": "08:45"},
+        {"subject": "מדעים", "teacher": "", "period": 3, "start": "09:50", "end": "10:35"},  # 2 is free
     ]
     assert kids["romi"]["5"][0]["subject"] == "חשבון"  # Friday
     assert kids["leo"]["0"] == [
-        {"start": "08:10", "end": "08:55", "subject": "תורה", "period": 1},
-        {"start": "09:45", "end": "10:30", "subject": "שחייה", "period": None},
+        {"subject": "תורה", "teacher": "", "period": 1, "start": "08:10", "end": "08:55"},
+        {"subject": "שחייה", "teacher": "", "period": 2, "start": "09:45", "end": "10:30"},
     ]
 
 
-def test_period_without_bell_is_explained(tmp_path):
+def test_school_by_period_alone_with_teachers(tmp_path):
     path = tmp_path / "family.yaml"
-    path.write_text("school_bells: {1: '08:00-08:45'}\npeople:\n  - id: leo\n    school: {ראשון: [שפה, חשבון]}\n", encoding="utf-8")
-    with pytest.raises(ConfigError, match="אין שעות לשיעור 2"):
-        load_people(path, {})
+    path.write_text("people:\n  - id: romi\n    school:\n      חמישי: [אומנות (ענת), '', 'זה\"ב (רננה)', שפה]\n", encoding="utf-8")
+    (romi,) = load_people(path, {})
+    assert [(l.period, l.subject, l.teacher, l.start) for l in romi.school[4]] == [
+        (1, "אומנות", "ענת", None),
+        (3, 'זה"ב', "רננה", None),
+        (4, "שפה", "", None),
+    ]

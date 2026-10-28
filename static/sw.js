@@ -1,6 +1,6 @@
 // Keeps the app opening offline, and shows the last loaded week when there is
 // no connection. Bump VERSION when the static files change.
-const VERSION = "v9";
+const VERSION = "v10";
 const SHELL = [
   "/",
   "/style.css",

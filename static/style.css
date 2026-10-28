@@ -477,3 +477,4 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .kid-label { font-weight: 600; color: var(--text); padding: 10px 2px; text-align: center; font-size: .95rem; }
 .kid-label .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c); margin-inline-end: 5px; }
 .school-empty { padding: 32px 16px; text-align: center; color: var(--muted); grid-column: 1 / -1; }
+.axis.periods span { font-size: .95rem; font-weight: 600; color: var(--text); }

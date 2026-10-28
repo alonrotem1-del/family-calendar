@@ -837,28 +837,44 @@ function renderSchool(firstTime = false) {
   scroller.style.setProperty("--days", columns.length);
   $("school-head").replaceChildren(el("div", { className: "cal-row" }, [el("div"), ...columns.map((c) => c.label)]));
 
-  // Hours: from the earliest lesson to the latest, across all children, so both views line up.
+  // Rows: one per period ("שיעור 1, 2, …") when the timetable has no hours,
+  // otherwise hours from the earliest lesson to the latest. Either way across
+  // all children, so the views line up. A row is drawn as 60 "minutes" tall.
   const all = kids.flatMap((k) => Object.values(k.days).flat());
-  const first = Math.floor(Math.min(...all.map((l) => minutesOf(l.start))) / 60);
-  const last = Math.ceil(Math.max(...all.map((l) => minutesOf(l.end))) / 60);
+  const byPeriod = all.some((l) => !l.start);
+  const first = byPeriod ? 0 : Math.floor(Math.min(...all.map((l) => minutesOf(l.start))) / 60);
+  const last = byPeriod
+    ? Math.max(...all.map((l) => l.period || 0))
+    : Math.ceil(Math.max(...all.map((l) => minutesOf(l.end))) / 60);
   const span = Math.max(1, last - first);
   const visible = scroller.clientHeight - $("school-head").offsetHeight;
-  const hour = Math.round(Math.min(140, Math.max(44, visible > 0 ? visible / span : 80)));
-  scroller.style.setProperty("--hour", hour + "px");
+  // Rounded down, so the last row isn't cut off by a pixel.
+  const row = Math.floor(Math.min(140, Math.max(byPeriod ? 56 : 44, visible > 0 ? (visible - 2) / span : 80)));
+  scroller.style.setProperty("--hour", row + "px");
 
   const body = $("school-body");
   body.style.height = `calc(var(--hour) * ${span})`;
-  const axis = el("div", { className: "axis" });
-  for (let h = first + 1; h < last; h++) {
-    axis.append(el("span", { style: { top: `calc(var(--hour) * ${h - first})` } }, `${String(h).padStart(2, "0")}:00`));
+  const axis = el("div", { className: "axis" + (byPeriod ? " periods" : "") });
+  if (byPeriod) {
+    for (let p = 1; p <= last; p++) {
+      axis.append(el("span", { style: { top: `calc(var(--hour) * ${p - 0.5})` } }, String(p)));
+    }
+  } else {
+    for (let h = first + 1; h < last; h++) {
+      axis.append(el("span", { style: { top: `calc(var(--hour) * ${h - first})` } }, `${String(h).padStart(2, "0")}:00`));
+    }
   }
+  const place = (l) => byPeriod
+    ? { start: (l.period - 1) * 60, end: l.period * 60 }
+    : { start: minutesOf(l.start) - first * 60, end: minutesOf(l.end) - first * 60 };
   body.replaceChildren(axis, ...columns.map((c) => {
     const col = el("div", { className: "day-col" + (c.today ? " is-today" : "") });
-    const items = c.lessons.map((l) => ({ lesson: l, start: minutesOf(l.start) - first * 60, end: minutesOf(l.end) - first * 60 }));
+    const items = c.lessons.filter((l) => !byPeriod || l.period).map((l) => ({ lesson: l, ...place(l) }));
     for (const item of arrange(items)) {
       const color = subjectColor(item.lesson.subject);
       const box = el("button", { type: "button", className: "event", "--c": color, "--stripe": color }, [
         el("span", { className: "title" }, item.lesson.subject),
+        item.lesson.teacher ? el("span", { className: "who" }, item.lesson.teacher) : null,
       ]);
       Object.assign(box.style, {
         top: `calc(var(--hour) * ${item.start / 60})`,
@@ -878,8 +894,9 @@ function showLesson(kid, day, lesson) {
   $("details-person").replaceChildren(el("span", { className: "dot", "--c": kid.color }), el("span", { className: "name" }, kid.name));
   $("details-title").textContent = lesson.subject;
   const period = lesson.period ? ` · שיעור ${lesson.period}` : "";
-  $("details-when").textContent = `יום ${DAY_NAMES[day]}${period} · \u2066${lesson.start}–${lesson.end}\u2069`;
-  $("details-where").textContent = "";
+  const hours = lesson.start ? ` · \u2066${lesson.start}–${lesson.end}\u2069` : "";
+  $("details-when").textContent = `יום ${DAY_NAMES[day]}${period}${hours}`;
+  $("details-where").textContent = lesson.teacher ? `👩‍🏫 ${lesson.teacher}` : "";
   $("details-actions").hidden = true;
   $("details").showModal();
 }
