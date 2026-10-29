@@ -610,3 +610,57 @@ def test_existing_postgres_table_gains_notes_and_keeps_events(postgres_url):
     EventStore(postgres_url)  # starting again is harmless
     saved = store.save({**old, "notes": "להביא כובע"}, old["id"])
     assert saved["notes"] == "להביא כובע"
+
+
+# ---- School notes ----------------------------------------------------------------
+
+WALK = {
+    "title": " יום ההליכה הארצי – ללא הורים ",
+    "people": ["leo", "kids"],
+    "date": "2026-10-30",
+    "notes": "תיק קטן: מים, אוכל וקלמר\nנעלי ספורט וכובע",
+}
+
+
+def test_school_notes_add_edit_delete(family_file):
+    client = signed_in(make_client(family_file))
+    note = client.post("/api/school/notes", json=WALK).json()
+    assert note["title"] == "יום ההליכה הארצי – ללא הורים"
+    assert note["people"] == ["kids", "leo"]  # family order
+    assert note["date"] == "2026-10-30"
+
+    listed = client.get("/api/school/notes?start=2026-10-25&end=2026-11-01").json()
+    assert [n["id"] for n in listed["notes"]] == [note["id"]] and listed["error"] is None
+    assert client.get("/api/school/notes?start=2026-11-01&end=2026-11-08").json()["notes"] == []
+    # Not in the calendar.
+    assert not any("ההליכה" in e["title"] for e in week(client)["events"])
+
+    edited = client.put(f"/api/school/notes/{note['id']}", json={**WALK, "date": "2026-11-01"}).json()
+    assert edited["date"] == "2026-11-01" and edited["id"] == note["id"]
+    assert client.delete(f"/api/school/notes/{note['id']}").status_code == 200
+    assert client.delete(f"/api/school/notes/{note['id']}").status_code == 404
+    assert client.put(f"/api/school/notes/{note['id']}", json=WALK).status_code == 404
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"title": " "}, "כותרת"),
+    ({"people": []}, "לפחות"),
+    ({"people": ["stranger"]}, "לא מוכר"),
+])
+def test_bad_school_notes_are_refused(family_file, change, message):
+    client = signed_in(make_client(family_file))
+    response = client.post("/api/school/notes", json={**WALK, **change})
+    assert response.status_code == 400 and message in response.json()["detail"]
+
+
+def test_school_notes_need_the_password(family_file):
+    client = make_client(family_file)
+    assert client.get("/api/school/notes?start=2026-10-25&end=2026-11-01").status_code == 401
+    assert client.post("/api/school/notes", json=WALK).status_code == 401
+
+
+def test_school_notes_in_postgres(postgres_url):
+    store = EventStore(postgres_url)
+    note = store.save_note({"day": "2026-10-30", "people": ["leo"], "title": "טיול", "notes": "כובע"})
+    assert EventStore(postgres_url).notes_between("2026-10-25", "2026-11-01") == [note]
+    assert store.delete_note(note["id"])

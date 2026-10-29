@@ -499,3 +499,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: 100%;
   resize: vertical;
 }
+
+/* Messages from school, above the timetable */
+.school-notes { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.school-notes:empty { display: none; }
+.note-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: start;
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: .92rem;
+  font-weight: 600;
+}
+.note-row .names { font-weight: 400; opacity: .8; }
+@media (prefers-color-scheme: dark) {
+  .note-row { background: #422006; border-color: #a16207; color: #fde68a; }
+}

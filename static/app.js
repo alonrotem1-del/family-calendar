@@ -632,7 +632,7 @@ function renderChosen() {
   $("ed-people").replaceChildren(...chips, all);
 }
 
-$("add").addEventListener("click", () => openEditor(null));
+$("add").addEventListener("click", () => (currentTab() === "school" ? openNoteEditor(null) : openEditor(null)));
 $("editor-form").addEventListener("input", () => ($("ed-error").textContent = ""));
 $("ed-people").addEventListener("click", () => ($("ed-error").textContent = ""));
 $("ed-cancel").addEventListener("click", () => $("editor").close());
@@ -714,7 +714,8 @@ const school = {
   loaded: false,
   view: readStored("schoolView", "week") === "day" ? "day" : "week",
   kid: readStored("schoolKid", null), // whose week is shown
-  day: null, // the day shown in day view: 0 = Sunday
+  date: null, // the day shown in day view; its week in week view
+  notes: new Map(), // week start -> { notes, error }: messages from school
 };
 
 // Soft colors for subjects; the same subject always gets the same one.
@@ -725,12 +726,17 @@ function subjectColor(subject) {
   return SUBJECT_COLORS[hash % SUBJECT_COLORS.length];
 }
 
+function currentTab() {
+  return $("school-tab").hidden ? "calendar" : "school";
+}
+
 function showTab(tab) {
   tab = tab === "school" ? "school" : "calendar";
   store("tab", tab);
   $("calendar-tab").hidden = tab !== "calendar";
   $("school-tab").hidden = tab !== "school";
-  $("add").hidden = tab !== "calendar";
+  // The same + button adds a calendar event, or a message from school.
+  $("add").setAttribute("aria-label", tab === "school" ? "הוספת הודעה מבית הספר" : "הוספת אירוע");
   for (const button of document.querySelectorAll(".tabbar button")) {
     button.setAttribute("aria-selected", String(button.dataset.tab === tab));
   }
@@ -755,30 +761,46 @@ async function loadSchool() {
   }
 }
 
+async function loadNotes(week) {
+  try {
+    const data = await api(`/api/school/notes?start=${week}&end=${addDays(week, 7)}`);
+    school.notes.set(week, data);
+  } catch (error) {
+    if (error.message === "unauthenticated") return;
+    school.notes.set(week, { notes: [], error: navigator.onLine ? error.message : "אין חיבור לאינטרנט" });
+  }
+  if (!$("school-tab").hidden && sundayOf(school.date) === week) renderSchool();
+}
+
 /** School days: Sunday to Thursday, plus Friday or Saturday if anyone studies then. */
 function schoolDays() {
   const used = new Set(school.kids.flatMap((k) => Object.keys(k.days).map(Number)));
   return [0, 1, 2, 3, 4, 5, 6].filter((d) => d <= 4 || used.has(d));
 }
 
-/** Today if it's a school day, else the next one (on Friday: Sunday). */
-function defaultSchoolDay() {
-  const today = utcDate(todayInZone()).getUTCDay();
-  const days = schoolDays();
-  return days.includes(today) ? today : days.find((d) => d > today) ?? days[0];
+const weekdayOf = (day) => utcDate(day).getUTCDay();
+
+/** Today if it's a school day, else the next one (on Saturday: Sunday). */
+function defaultSchoolDate() {
+  let day = todayInZone();
+  while (!schoolDays().includes(weekdayOf(day))) day = addDays(day, 1);
+  return day;
 }
 
-function stepSchoolDay(direction) {
-  const days = schoolDays();
-  const i = days.indexOf(school.day);
-  school.day = days[(i + direction + days.length) % days.length];
+function stepSchool(direction) {
+  if (school.view === "week") {
+    school.date = addDays(school.date, 7 * direction);
+  } else {
+    do school.date = addDays(school.date, direction);
+    while (!schoolDays().includes(weekdayOf(school.date)));
+  }
   renderSchool();
 }
 
-$("school-prev").addEventListener("click", () => stepSchoolDay(-1));
-$("school-next").addEventListener("click", () => stepSchoolDay(1));
+$("school-prev").addEventListener("click", () => stepSchool(-1));
+$("school-next").addEventListener("click", () => stepSchool(1));
 $("school-today").addEventListener("click", () => {
-  school.day = defaultSchoolDay();
+  school.date = defaultSchoolDate();
   renderSchool();
 });
 for (const button of document.querySelectorAll("#school-views button")) {
@@ -791,22 +813,29 @@ for (const button of document.querySelectorAll("#school-views button")) {
 
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 const DAY_LETTERS = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+const shortDate = (day) => `${Number(day.slice(8))}.${Number(day.slice(5, 7))}`;
 
 function renderSchool(firstTime = false) {
   const kids = school.kids;
   if (!school.kids.some((k) => k.id === school.kid)) school.kid = kids[0]?.id ?? null;
-  if (school.day === null) school.day = defaultSchoolDay();
+  if (school.date === null) school.date = defaultSchoolDate();
   const isDay = school.view === "day";
   const kid = kids.find((k) => k.id === school.kid);
-  const days = schoolDays();
-  const today = utcDate(todayInZone()).getUTCDay();
+  const today = todayInZone();
+  const week = sundayOf(school.date);
+  const dates = isDay
+    ? [school.date]
+    : schoolDays().map((d) => addDays(week, d));
 
   for (const button of document.querySelectorAll("#school-views button")) {
     button.setAttribute("aria-pressed", String(button.dataset.view === school.view));
   }
-  $("school-nav").hidden = !isDay;
   $("school-kids").hidden = isDay || kids.length < 2;
-  $("school-title").textContent = isDay ? `יום ${DAY_NAMES[school.day]}` : kid ? `מערכת שעות · ${kid.name}` : "מערכת שעות";
+  $("school-prev").setAttribute("aria-label", isDay ? "היום הקודם" : "השבוע הקודם");
+  $("school-next").setAttribute("aria-label", isDay ? "היום הבא" : "השבוע הבא");
+  $("school-title").textContent = isDay
+    ? `יום ${DAY_NAMES[weekdayOf(school.date)]}, ${shortDate(school.date)}`
+    : `${kid ? kid.name + " · " : ""}${shortDate(dates[0])}–${shortDate(dates[dates.length - 1])}`;
 
   // Week view: pick one child.
   $("school-kids").replaceChildren(...kids.map((k) => {
@@ -819,6 +848,24 @@ function renderSchool(firstTime = false) {
     return chip;
   }));
 
+  // Messages from school: the day's, or the chosen child's week.
+  const loaded = school.notes.get(week);
+  if (!loaded) loadNotes(week);
+  const notes = (loaded?.notes || []).filter((n) => isDay ? n.date === school.date : n.people.includes(school.kid));
+  $("school-notes").replaceChildren(
+    ...(loaded?.error ? [el("div", { className: "notice" }, loaded.error)] : []),
+    ...notes.map((n) => {
+      const when = isDay ? "" : `${DAY_LETTERS[weekdayOf(n.date)]} ${shortDate(n.date)} · `;
+      const who = isDay ? n.people.map((id) => personById(id).name).join(", ") : "";
+      const row = el("button", { type: "button", className: "note-row" }, [
+        el("span", {}, `📌 ${when}${n.title}`),
+        who ? el("span", { className: "names" }, who) : null,
+      ]);
+      row.addEventListener("click", () => showNote(n));
+      return row;
+    }),
+  );
+
   const scroller = $("school-scroller");
   if (!kids.length) {
     scroller.style.setProperty("--days", 1);
@@ -828,15 +875,23 @@ function renderSchool(firstTime = false) {
   }
 
   // Columns: the days of one child's week, or every child on one day.
+  const noteDays = new Set(notes.map((n) => n.date));
   const columns = isDay
-    ? kids.map((k) => ({ key: k.id, lessons: k.days[school.day] || [], label: el("div", { className: "kid-label" }, [el("span", { className: "dot", "--c": k.color }), k.name]), kid: k, day: school.day }))
-    : days.map((d) => ({
-        key: d,
-        lessons: kid.days[d] || [],
-        label: el("div", { className: "day-label" + (d === today ? " is-today" : "") }, [el("span", { className: "num" }, DAY_LETTERS[d])]),
+    ? kids.map((k) => ({
+        lessons: k.days[weekdayOf(school.date)] || [],
+        label: el("div", { className: "kid-label" }, [el("span", { className: "dot", "--c": k.color }), k.name]),
+        kid: k,
+        date: school.date,
+      }))
+    : dates.map((day) => ({
+        lessons: kid.days[weekdayOf(day)] || [],
+        label: el("div", { className: "day-label" + (day === today ? " is-today" : "") }, [
+          el("span", {}, DAY_LETTERS[weekdayOf(day)] + (noteDays.has(day) ? " 📌" : "")),
+          el("span", { className: "num" }, String(Number(day.slice(8)))),
+        ]),
         kid,
-        day: d,
-        today: d === today,
+        date: day,
+        today: day === today,
       }));
   scroller.style.setProperty("--days", columns.length);
   $("school-head").replaceChildren(el("div", { className: "cal-row" }, [el("div"), ...columns.map((c) => c.label)]));
@@ -886,7 +941,7 @@ function renderSchool(firstTime = false) {
         insetInlineStart: `calc(${(item.col * 100) / item.cols}% + 2px)`,
         width: `calc(${100 / item.cols}% - 4px)`,
       });
-      box.addEventListener("click", () => showLesson(c.kid, c.day, item.lesson));
+      box.addEventListener("click", () => showLesson(c.kid, c.date, item.lesson));
       col.append(box);
     }
     return col;
@@ -898,13 +953,117 @@ function showLesson(kid, day, lesson) {
   $("details-person").replaceChildren(el("span", { className: "dot", "--c": kid.color }), el("span", { className: "name" }, kid.name));
   $("details-title").textContent = lesson.subject;
   const period = lesson.period ? ` · שיעור ${lesson.period}` : "";
-  const hours = lesson.start ? ` · \u2066${lesson.start}–${lesson.end}\u2069` : "";
-  $("details-when").textContent = `יום ${DAY_NAMES[day]}${period}${hours}`;
+  const hours = lesson.start ? ` · ⁦${lesson.start}–${lesson.end}⁩` : "";
+  $("details-when").textContent = `יום ${DAY_NAMES[weekdayOf(day)]}, ${shortDate(day)}${period}${hours}`;
   $("details-where").textContent = lesson.teacher ? `👩‍🏫 ${lesson.teacher}` : "";
   $("details-notes").textContent = "";
   $("details-actions").hidden = true;
   $("details").showModal();
 }
+
+// ---- Messages from school ---------------------------------------------------
+
+function showNote(note) {
+  $("details-person").replaceChildren(...note.people.map(personById).flatMap((p) => [
+    el("span", { className: "dot", "--c": p.color }),
+    el("span", { className: "name" }, p.name),
+  ]));
+  $("details-title").textContent = `📌 ${note.title}`;
+  $("details-when").textContent = `יום ${DAY_NAMES[weekdayOf(note.date)]}, ${shortDate(note.date)}`;
+  $("details-where").textContent = "";
+  $("details-notes").textContent = note.notes || "";
+  $("details-actions").hidden = false;
+  $("details-edit").onclick = () => {
+    $("details").close();
+    openNoteEditor(note);
+  };
+  $("details-delete").onclick = () => deleteNote(note);
+  $("details").showModal();
+}
+
+let editingNote = null;
+let noteKids = new Set();
+
+function openNoteEditor(note) {
+  editingNote = note || null;
+  $("note-heading").textContent = note ? "עריכת הודעה מבית הספר" : "הודעה מבית הספר";
+  $("nt-title").value = note?.title || "";
+  $("nt-date").value = note?.date || (school.view === "day" ? school.date : defaultSchoolDate());
+  $("nt-notes").value = note?.notes || "";
+  noteKids = new Set(note ? note.people : school.view === "week" && school.kid ? [school.kid] : []);
+  renderNoteKids();
+  $("nt-error").textContent = "";
+  $("note-editor").showModal();
+  if (!note) $("nt-title").focus();
+}
+
+function renderNoteKids() {
+  $("nt-kids").replaceChildren(...school.kids.map((k) => {
+    const chip = el("button", { type: "button", className: "chip", "--c": k.color, "aria-pressed": String(noteKids.has(k.id)) }, k.name);
+    chip.addEventListener("click", () => {
+      if (noteKids.has(k.id)) noteKids.delete(k.id);
+      else noteKids.add(k.id);
+      $("nt-error").textContent = "";
+      renderNoteKids();
+    });
+    return chip;
+  }));
+}
+
+$("nt-cancel").addEventListener("click", () => $("note-editor").close());
+$("note-form").addEventListener("input", () => ($("nt-error").textContent = ""));
+
+$("note-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    title: $("nt-title").value,
+    people: school.kids.map((k) => k.id).filter((id) => noteKids.has(id)),
+    date: $("nt-date").value,
+    notes: $("nt-notes").value,
+  };
+  const missing = !body.title.trim() ? "צריך לכתוב כותרת"
+    : !body.people.length ? "צריך לבחור ילד"
+    : !body.date ? "צריך לבחור תאריך" : "";
+  if (missing) {
+    $("nt-error").textContent = missing;
+    return;
+  }
+  const save = $("note-form").querySelector("[type=submit]");
+  save.disabled = true;
+  try {
+    const saved = await api(editingNote ? `/api/school/notes/${editingNote.id}` : "/api/school/notes", {
+      method: editingNote ? "PUT" : "POST",
+      body: JSON.stringify(body),
+    });
+    $("note-editor").close();
+    if (editingNote) school.notes.delete(sundayOf(editingNote.date));
+    school.notes.delete(sundayOf(saved.date));
+    // Show the day the message is for, in the view in use.
+    school.date = saved.date;
+    if (school.view === "week" && !saved.people.includes(school.kid)) school.kid = saved.people[0];
+    await loadNotes(sundayOf(saved.date));
+    renderSchool();
+    toast(`נשמר: ${saved.title} · יום ${DAY_NAMES[weekdayOf(saved.date)]}, ${shortDate(saved.date)}`);
+  } catch (error) {
+    if (error.message !== "unauthenticated") $("nt-error").textContent = error.message;
+  } finally {
+    save.disabled = false;
+  }
+});
+
+async function deleteNote(note) {
+  if (!confirm(`למחוק את "${note.title}"?`)) return;
+  try {
+    await api(`/api/school/notes/${note.id}`, { method: "DELETE" });
+    $("details").close();
+    school.notes.delete(sundayOf(note.date));
+    await loadNotes(sundayOf(note.date));
+  } catch (error) {
+    if (error.message !== "unauthenticated") alert(error.message);
+  }
+}
+
+closeOnOutsideTap($("note-editor"));
 
 // ---- Boot -----------------------------------------------------------------
 

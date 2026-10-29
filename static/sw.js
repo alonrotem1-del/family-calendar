@@ -1,6 +1,6 @@
 // Keeps the app opening offline, and shows the last loaded week when there is
 // no connection. Bump VERSION when the static files change.
-const VERSION = "v11";
+const VERSION = "v12";
 const SHELL = [
   "/",
   "/style.css",
@@ -28,7 +28,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== location.origin) return;
 
-  if (["/api/events", "/api/people", "/api/school"].includes(url.pathname)) {
+  if (["/api/events", "/api/people", "/api/school", "/api/school/notes"].includes(url.pathname)) {
     // Network first; the cached copy only when offline.
     event.respondWith(
       fetch(event.request)

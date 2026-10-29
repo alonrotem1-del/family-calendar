@@ -80,6 +80,7 @@
         <button type="button" data-view="week">שבוע</button>
       </div>
       <nav id="school-kids" class="filters" aria-label="בחירת ילד"></nav>
+      <div id="school-notes" class="school-notes"></div>
       <div id="school-scroller" class="scroller">
         <div id="school-head" class="cal-head"></div>
         <div id="school-body" class="cal-body"></div>
@@ -143,6 +144,29 @@
       <div class="dialog-buttons">
         <button type="submit" class="primary">שמירה</button>
         <button type="button" id="ed-cancel">ביטול</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="note-editor" class="details editor">
+    <form id="note-form" novalidate>
+      <h2 id="note-heading">הודעה מבית הספר</h2>
+      <label class="field">כותרת
+        <input id="nt-title" maxlength="120" placeholder="למשל: יום ההליכה הארצי – ללא הורים" autocomplete="off">
+      </label>
+      <div class="field">לאיזה ילד (אפשר כמה)
+        <div id="nt-kids" class="ed-people"></div>
+      </div>
+      <label class="field">תאריך
+        <input id="nt-date" type="date">
+      </label>
+      <label class="field">פרטים (לא חובה)
+        <textarea id="nt-notes" rows="5" maxlength="2000" placeholder="מה להביא, מה ללבוש, או ההודעה של המורה כמו שהיא"></textarea>
+      </label>
+      <p id="nt-error" class="login-error" role="alert"></p>
+      <div class="dialog-buttons">
+        <button type="submit" class="primary">שמירה</button>
+        <button type="button" id="nt-cancel">ביטול</button>
       </div>
     </form>
   </dialog>

@@ -35,7 +35,21 @@ CREATE TABLE IF NOT EXISTS family_events (
 )
 """
 
+# Messages from school for a given day: "national walking day, no parents,
+# bring water and a hat". They show in the timetable tab, not the calendar.
+NOTES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS school_notes (
+    id TEXT PRIMARY KEY,
+    day TEXT NOT NULL,
+    people TEXT NOT NULL,
+    title TEXT NOT NULL,
+    notes TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+)
+"""
+
 COLUMNS = "id, title, people, start_at, end_at, all_day, location, notes, first_day, last_day, updated_at"
+NOTE_COLUMNS = "id, day, people, title, notes, updated_at"
 
 # Columns added after the table first went live; existing tables get them at startup.
 ADDED_COLUMNS = {"notes": "TEXT NOT NULL DEFAULT ''"}
@@ -77,6 +91,7 @@ class EventStore:
         try:
             with self._connect(self.direct_url) as db:
                 db.execute(SCHEMA)
+                db.execute(NOTES_SCHEMA)
                 if self.database_url:
                     for name, kind in ADDED_COLUMNS.items():
                         db.execute(f"ALTER TABLE family_events ADD COLUMN IF NOT EXISTS {name} {kind}")
@@ -114,6 +129,7 @@ class EventStore:
             conn = sqlite3.connect(self.sqlite_path)
             try:
                 conn.execute(SCHEMA)  # the local file may have been deleted meanwhile
+                conn.execute(NOTES_SCHEMA)
                 yield conn
                 conn.commit()
             finally:
@@ -183,6 +199,52 @@ class EventStore:
             return db.execute("DELETE FROM family_events WHERE id = ?", (event_id,)).rowcount > 0
 
 
+    # ---- School notes -------------------------------------------------------
+
+    def notes_between(self, first_day: str, end_day: str) -> list[dict]:
+        """School notes for the days [first_day, end_day)."""
+        self._require()
+        with self._connect() as db:
+            rows = db.execute(
+                f"SELECT {NOTE_COLUMNS} FROM school_notes WHERE day >= ? AND day < ? ORDER BY day, updated_at",
+                (first_day, end_day),
+            ).fetchall()
+        return [_note(r) for r in rows]
+
+    def save_note(self, note: dict, note_id: str | None = None) -> dict | None:
+        """Adds a note, or replaces the one with `note_id`. Returns None if that one is gone."""
+        self._require()
+        note_id = note_id or uuid.uuid4().hex
+        values = (
+            note["day"],
+            ",".join(note["people"]),
+            note["title"],
+            note["notes"],
+            datetime.now(timezone.utc).isoformat(),
+            note_id,
+        )
+        with self._connect() as db:
+            if note.get("replace"):
+                changed = db.execute(
+                    "UPDATE school_notes SET day = ?, people = ?, title = ?, notes = ?, updated_at = ? WHERE id = ?",
+                    values,
+                ).rowcount
+                if not changed:
+                    return None
+            else:
+                db.execute(
+                    "INSERT INTO school_notes (day, people, title, notes, updated_at, id) VALUES (?, ?, ?, ?, ?, ?)",
+                    values,
+                )
+            row = db.execute(f"SELECT {NOTE_COLUMNS} FROM school_notes WHERE id = ?", (note_id,)).fetchone()
+        return _note(row)
+
+    def delete_note(self, note_id: str) -> bool:
+        self._require()
+        with self._connect() as db:
+            return db.execute("DELETE FROM school_notes WHERE id = ?", (note_id,)).rowcount > 0
+
+
 class _Postgres:
     """Lets the queries above use sqlite's ? placeholders on Postgres too."""
 
@@ -207,4 +269,15 @@ def _row(row) -> dict:
         "first_day": first_day,
         "last_day": last_day,
         "updated_at": updated,
+    }
+
+
+def _note(row) -> dict:
+    note_id, day, people, title, notes, updated = row
+    return {
+        "id": note_id,
+        "date": day,
+        "people": [p for p in people.split(",") if p],
+        "title": title,
+        "notes": notes,
     }

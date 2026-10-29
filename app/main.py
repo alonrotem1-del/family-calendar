@@ -54,6 +54,30 @@ def _clock(value: str | None, label: str) -> time:
     return time(int(match[1]), int(match[2]))
 
 
+class SchoolNote(BaseModel):
+    """A message from school for one day, for one or more children."""
+
+    title: str
+    people: list[str]
+    date: date
+    notes: str = ""
+
+
+def note_to_stored(body: SchoolNote, settings: Settings) -> dict:
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="צריך לכתוב כותרת להודעה")
+    if len(title) > 120:
+        raise HTTPException(status_code=400, detail="הכותרת ארוכה מדי")
+    known = [p.id for p in settings.people]
+    if set(body.people) - set(known):
+        raise HTTPException(status_code=400, detail="בן משפחה לא מוכר")
+    people = [p for p in known if p in set(body.people)]
+    if not people:
+        raise HTTPException(status_code=400, detail="צריך לבחור לפחות ילד אחד")
+    return {"day": body.date.isoformat(), "people": people, "title": title, "notes": body.notes.strip()[:2000]}
+
+
 def to_stored(body: FamilyEvent, settings: Settings) -> dict:
     """Checks a new or edited event and turns it into what the store keeps."""
     title = body.title.strip()
@@ -180,6 +204,32 @@ def create_app(
                 if p.school
             ]
         }
+
+    @app.get("/api/school/notes", dependencies=[Depends(require_session)])
+    def school_notes(start: date, end: date):
+        if end <= start or end - start > timedelta(days=MAX_RANGE_DAYS):
+            raise HTTPException(status_code=400, detail="טווח תאריכים לא תקין")
+        try:
+            return {"notes": store.notes_between(start.isoformat(), end.isoformat()), "error": None}
+        except StoreUnavailable as exc:
+            return {"notes": [], "error": f"הודעות בית הספר לא זמינות כרגע: אין חיבור למסד הנתונים ({exc})"}
+
+    @app.post("/api/school/notes", dependencies=[Depends(require_session)])
+    def add_school_note(body: SchoolNote):
+        return store.save_note(note_to_stored(body, settings))
+
+    @app.put("/api/school/notes/{note_id}", dependencies=[Depends(require_session)])
+    def edit_school_note(note_id: str, body: SchoolNote):
+        saved = store.save_note(note_to_stored(body, settings) | {"replace": True}, note_id)
+        if saved is None:
+            raise HTTPException(status_code=404, detail="ההודעה כבר לא קיימת")
+        return saved
+
+    @app.delete("/api/school/notes/{note_id}", dependencies=[Depends(require_session)])
+    def delete_school_note(note_id: str):
+        if not store.delete_note(note_id):
+            raise HTTPException(status_code=404, detail="ההודעה כבר לא קיימת")
+        return {"deleted": True}
 
     @app.get("/api/events", dependencies=[Depends(require_session)])
     async def events(start: date, end: date):
