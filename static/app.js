@@ -462,7 +462,8 @@ function eventBox(event, detailed) {
     "--c": people[0].color,
     "--stripe": stripe(people),
   }, [
-    el("span", { className: "title" }, event.title),
+    // A small mark says there's more inside: what to bring, what to wear.
+    el("span", { className: "title" }, event.notes ? `${event.title} 📝` : event.title),
     el("span", { className: "who" }, who),
   ]);
   box.addEventListener("click", () => showDetails(event));
@@ -493,6 +494,7 @@ function showDetails(event) {
   $("details-delete").onclick = () => deleteEvent(event);
   $("details-when").textContent = whenText(event);
   $("details-where").textContent = event.location ? "📍 " + event.location : "";
+  $("details-notes").textContent = event.notes || "";
   dialog.showModal();
 }
 
@@ -593,6 +595,7 @@ function openEditor(event, preset = {}) {
   setClock("ed-start", start);
   setClock("ed-end", event && !event.allDay ? timeOf(event.end) : hourLater(start));
   $("ed-location").value = event?.location || "";
+  $("ed-notes").value = event?.notes || "";
   chosen = new Set(event ? event.people : []);
   renderChosen();
   $("ed-times").hidden = $("ed-allday").checked;
@@ -653,6 +656,7 @@ $("editor-form").addEventListener("submit", async (e) => {
     start: getClock("ed-start"),
     end: getClock("ed-end"),
     location: $("ed-location").value,
+    notes: $("ed-notes").value,
   };
   // Say what's missing here rather than after a round trip.
   const missing = !body.title.trim() ? "צריך לכתוב מה האירוע"
@@ -897,6 +901,7 @@ function showLesson(kid, day, lesson) {
   const hours = lesson.start ? ` · \u2066${lesson.start}–${lesson.end}\u2069` : "";
   $("details-when").textContent = `יום ${DAY_NAMES[day]}${period}${hours}`;
   $("details-where").textContent = lesson.teacher ? `👩‍🏫 ${lesson.teacher}` : "";
+  $("details-notes").textContent = "";
   $("details-actions").hidden = true;
   $("details").showModal();
 }

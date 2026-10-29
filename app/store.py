@@ -28,13 +28,17 @@ CREATE TABLE IF NOT EXISTS family_events (
     end_at TEXT NOT NULL,
     all_day INTEGER NOT NULL,
     location TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
     first_day TEXT NOT NULL,
     last_day TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
 """
 
-COLUMNS = "id, title, people, start_at, end_at, all_day, location, first_day, last_day, updated_at"
+COLUMNS = "id, title, people, start_at, end_at, all_day, location, notes, first_day, last_day, updated_at"
+
+# Columns added after the table first went live; existing tables get them at startup.
+ADDED_COLUMNS = {"notes": "TEXT NOT NULL DEFAULT ''"}
 
 log = logging.getLogger("uvicorn.error")  # shows up in Render's Logs
 
@@ -68,10 +72,19 @@ class EventStore:
         return self.database_url is not None
 
     def _prepare(self) -> None:
-        """Creates the table. A failure is remembered, not raised, so the app still starts."""
+        """Creates the table, or adds columns it lacks. A failure is remembered,
+        not raised, so the app still starts."""
         try:
             with self._connect(self.direct_url) as db:
                 db.execute(SCHEMA)
+                if self.database_url:
+                    for name, kind in ADDED_COLUMNS.items():
+                        db.execute(f"ALTER TABLE family_events ADD COLUMN IF NOT EXISTS {name} {kind}")
+                else:  # SQLite has no ADD COLUMN IF NOT EXISTS
+                    present = {row[1] for row in db.execute("PRAGMA table_info(family_events)")}
+                    for name, kind in ADDED_COLUMNS.items():
+                        if name not in present:
+                            db.execute(f"ALTER TABLE family_events ADD COLUMN {name} {kind}")
         except Exception as exc:
             self.error = exc.args[0] if isinstance(exc, StoreUnavailable) else _describe(exc)
             log.error("Events database unavailable: %s", self.error)
@@ -139,6 +152,7 @@ class EventStore:
             stored["end"],
             int(stored["allDay"]),
             stored["location"],
+            stored.get("notes", ""),
             stored["first_day"],
             stored["last_day"],
             stored["updated_at"],
@@ -148,7 +162,7 @@ class EventStore:
             if event_id:
                 changed = db.execute(
                     "UPDATE family_events SET title = ?, people = ?, start_at = ?, end_at = ?,"
-                    " all_day = ?, location = ?, first_day = ?, last_day = ?, updated_at = ?"
+                    " all_day = ?, location = ?, notes = ?, first_day = ?, last_day = ?, updated_at = ?"
                     " WHERE id = ?",
                     values,
                 ).rowcount
@@ -157,8 +171,8 @@ class EventStore:
             else:
                 db.execute(
                     "INSERT INTO family_events (title, people, start_at, end_at, all_day,"
-                    " location, first_day, last_day, updated_at, id)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " location, notes, first_day, last_day, updated_at, id)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     values,
                 )
         return self.get(stored["id"])
@@ -180,7 +194,7 @@ class _Postgres:
 
 
 def _row(row) -> dict:
-    (event_id, title, people, start, end, all_day, location, first_day, last_day, updated) = row
+    (event_id, title, people, start, end, all_day, location, notes, first_day, last_day, updated) = row
     return {
         "id": event_id,
         "title": title,
@@ -189,6 +203,7 @@ def _row(row) -> dict:
         "end": end,
         "allDay": bool(all_day),
         "location": location,
+        "notes": notes,
         "first_day": first_day,
         "last_day": last_day,
         "updated_at": updated,

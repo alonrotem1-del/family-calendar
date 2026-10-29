@@ -478,3 +478,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .kid-label .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c); margin-inline-end: 5px; }
 .school-empty { padding: 32px 16px; text-align: center; color: var(--muted); grid-column: 1 / -1; }
 .axis.periods span { font-size: .95rem; font-weight: 600; color: var(--text); }
+
+/* Notes on an event: kept as typed, line breaks included */
+.details-notes {
+  white-space: pre-wrap;
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 10px !important;
+  line-height: 1.5;
+}
+.field textarea {
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text);
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  width: 100%;
+  resize: vertical;
+}

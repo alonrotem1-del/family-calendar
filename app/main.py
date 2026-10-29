@@ -44,6 +44,7 @@ class FamilyEvent(BaseModel):
     start: str | None = None  # "17:00"
     end: str | None = None  # "18:30"
     location: str = ""
+    notes: str = ""  # what to bring, what to wear, the teacher's message
 
 
 def _clock(value: str | None, label: str) -> time:
@@ -82,6 +83,7 @@ def to_stored(body: FamilyEvent, settings: Settings) -> dict:
         "end": end,
         "allDay": body.allDay,
         "location": body.location.strip()[:200],
+        "notes": body.notes.strip()[:2000],
         "first_day": day,
         "last_day": day,
     }
@@ -99,7 +101,7 @@ def same_database(pooled: str | None, direct: str | None) -> bool | None:
 
 def to_api(stored: dict) -> dict:
     return {
-        key: stored[key] for key in ("id", "title", "people", "start", "end", "allDay", "location")
+        key: stored[key] for key in ("id", "title", "people", "start", "end", "allDay", "location", "notes")
     } | {"editable": True}
 
 

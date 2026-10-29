@@ -552,3 +552,61 @@ def test_school_by_period_alone_with_teachers(tmp_path):
         (3, 'זה"ב', "רננה", None),
         (4, "שפה", "", None),
     ]
+
+
+# ---- Notes on events ------------------------------------------------------------
+
+WALKING_DAY = {
+    "title": "יום ההליכה הארצי – ללא הורים",
+    "people": ["leo", "kids"],
+    "date": "2026-10-30",
+    "allDay": True,
+    "notes": "  תיק קטן: מים, אוכל וקלמר\nנעלי ספורט וכובע  ",
+}
+
+
+def test_event_notes_round_trip(family_file):
+    client = signed_in(make_client(family_file))
+    event = client.post("/api/events", json=WALKING_DAY).json()
+    assert event["notes"] == "תיק קטן: מים, אוכל וקלמר\nנעלי ספורט וכובע"
+    shown = [e for e in week(client)["events"] if e.get("editable")]
+    assert shown[0]["notes"] == event["notes"]
+    edited = client.put(f"/api/events/{event['id']}", json={**WALKING_DAY, "notes": ""}).json()
+    assert edited["notes"] == ""
+    # Feed and activity events have no notes field at all; the app treats that as none.
+    assert all("notes" not in e for e in week(client)["events"] if not e.get("editable"))
+
+
+OLD_SCHEMA = """CREATE TABLE family_events (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL, people TEXT NOT NULL,
+    start_at TEXT NOT NULL, end_at TEXT NOT NULL, all_day INTEGER NOT NULL,
+    location TEXT NOT NULL DEFAULT '', first_day TEXT NOT NULL,
+    last_day TEXT NOT NULL, updated_at TEXT NOT NULL)"""
+OLD_ROW = ("old1", "יום הורים", "aba,leo", "2026-10-28T18:30:00+02:00", "2026-10-28T19:30:00+02:00",
+           0, "", "2026-10-28", "2026-10-28", "2026-10-27T10:00:00+00:00")
+
+
+def test_existing_sqlite_table_gains_notes_and_keeps_events(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "events.db"
+    with sqlite3.connect(path) as db:
+        db.execute(OLD_SCHEMA)
+        db.execute("INSERT INTO family_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", OLD_ROW)
+    store = EventStore(sqlite_path=path)
+    (old,) = store.between("2026-10-25", "2026-11-01")
+    assert old["title"] == "יום הורים" and old["notes"] == ""
+
+
+def test_existing_postgres_table_gains_notes_and_keeps_events(postgres_url):
+    import psycopg
+
+    with psycopg.connect(postgres_url) as db:
+        db.execute(OLD_SCHEMA)
+        db.execute("INSERT INTO family_events VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", OLD_ROW)
+    store = EventStore(postgres_url)
+    (old,) = store.between("2026-10-25", "2026-11-01")
+    assert old["title"] == "יום הורים" and old["notes"] == ""
+    EventStore(postgres_url)  # starting again is harmless
+    saved = store.save({**old, "notes": "להביא כובע"}, old["id"])
+    assert saved["notes"] == "להביא כובע"

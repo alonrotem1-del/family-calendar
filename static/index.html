@@ -101,6 +101,7 @@
       <h2 id="details-title"></h2>
       <p id="details-when"></p>
       <p id="details-where"></p>
+      <p id="details-notes" class="details-notes"></p>
       <div id="details-actions" class="dialog-buttons" hidden>
         <button type="button" id="details-edit">עריכה</button>
         <button type="button" id="details-delete" class="danger">מחיקה</button>
@@ -133,6 +134,9 @@
       </div>
       <label class="field">איפה (לא חובה)
         <input id="ed-location" maxlength="200" autocomplete="off">
+      </label>
+      <label class="field">הערות (לא חובה)
+        <textarea id="ed-notes" rows="3" maxlength="2000" placeholder="למשל: להביא מים, אוכל וקלמר, נעלי ספורט וכובע"></textarea>
       </label>
       <p id="ed-warning" class="notice" hidden>האפליקציה עוד לא מחוברת למסד נתונים, ולכן אירועים שמוסיפים יימחקו כשהשרת יופעל מחדש. ההוראות לחיבור נמצאות ב-README.</p>
       <p id="ed-error" class="login-error" role="alert"></p>
