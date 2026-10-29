@@ -143,6 +143,16 @@ def create_app(
 
     app = FastAPI(title="יומן משפחתי", docs_url=None, redoc_url=None)
 
+    @app.middleware("http")
+    async def always_fresh(request: Request, call_next):
+        """Without this, a phone may keep running yesterday's app.js after an
+        update. no-cache still lets it reuse a copy, but only after checking it
+        (a quick 304 when nothing changed). Family data is never stored."""
+        response = await call_next(request)
+        api = request.url.path.startswith("/api/")
+        response.headers.setdefault("Cache-Control", "no-store" if api else "no-cache")
+        return response
+
     def is_signed_in(request: Request) -> bool:
         cookie = request.cookies.get(SESSION_COOKIE, "")
         return settings.password is not None and hmac.compare_digest(cookie, session_token)

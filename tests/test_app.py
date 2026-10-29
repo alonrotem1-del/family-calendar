@@ -664,3 +664,10 @@ def test_school_notes_in_postgres(postgres_url):
     note = store.save_note({"day": "2026-10-30", "people": ["leo"], "title": "טיול", "notes": "כובע"})
     assert EventStore(postgres_url).notes_between("2026-10-25", "2026-11-01") == [note]
     assert store.delete_note(note["id"])
+
+
+def test_phones_always_check_for_a_new_version(family_file):
+    client = make_client(family_file)
+    for path in ("/", "/app.js", "/style.css", "/sw.js"):
+        assert client.get(path).headers["cache-control"] == "no-cache", path
+    assert signed_in(client).get("/api/people").headers["cache-control"] == "no-store"
