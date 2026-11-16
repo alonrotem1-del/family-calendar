@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -331,6 +331,24 @@ def create_app(
             "storage": storage_kind(),
             "sameDatabase": same_database(settings.database_url, settings.database_url_unpooled),
         }
+
+    # The page names its script and style by content ("/app.js?v=3f2a…"), so a
+    # phone that saved them can open at once without asking the server, and a
+    # new version is a new name it fetches fresh.
+    assets = hashlib.sha256(
+        b"".join((STATIC_DIR / name).read_bytes() for name in ("app.js", "style.css"))
+    ).hexdigest()[:12]
+    index_html = (
+        (STATIC_DIR / "index.html")
+        .read_text(encoding="utf-8")
+        .replace('href="/style.css"', f'href="/style.css?v={assets}"')
+        .replace('src="/app.js"', f'src="/app.js?v={assets}"')
+    )
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/index.html", include_in_schema=False)
+    def index():
+        return HTMLResponse(index_html)
 
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app

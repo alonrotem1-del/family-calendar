@@ -671,3 +671,13 @@ def test_phones_always_check_for_a_new_version(family_file):
     for path in ("/", "/app.js", "/style.css", "/sw.js"):
         assert client.get(path).headers["cache-control"] == "no-cache", path
     assert signed_in(client).get("/api/people").headers["cache-control"] == "no-store"
+
+
+def test_page_names_its_files_by_content(family_file):
+    import re
+
+    page = make_client(family_file).get("/").text
+    (script,) = re.findall(r'src="/app.js\?v=([0-9a-f]{12})"', page)
+    (style,) = re.findall(r'href="/style.css\?v=([0-9a-f]{12})"', page)
+    assert script == style
+    assert make_client(family_file).get(f"/app.js?v={script}").status_code == 200

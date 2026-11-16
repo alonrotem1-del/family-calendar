@@ -135,18 +135,47 @@ $("login-form").addEventListener("submit", async (event) => {
 $("logout").addEventListener("click", async () => {
   await api("/api/logout", { method: "POST" }).catch(() => {});
   state.weeks.clear();
+  try {
+    await caches.delete("data"); // the family's data stays on this phone only while signed in
+  } catch {
+    /* no Cache API */
+  }
   showLogin();
 });
 
+/** The last answer saved on this phone, shown at once while the server wakes up. */
+async function cachedApi(path) {
+  try {
+    const response = await caches.match(path);
+    if (!response) return null;
+    return { ...(await response.json()), fromCache: true };
+  } catch {
+    return null;
+  }
+}
+
 // ---- Loading --------------------------------------------------------------
 
-async function start() {
-  const info = await api("/api/people");
+function applyPeople(info) {
   state.timezone = info.timezone;
   partsFormat = null;
   state.people = info.people;
   state.storage = info.storage;
   state.storageError = info.storageError;
+}
+
+/** Opens the app; with `saved`, at once from this phone's last data. */
+async function start(saved = null) {
+  applyPeople(saved || (await api("/api/people")));
+  if (saved) {
+    api("/api/people")
+      .then((info) => {
+        applyPeople(info);
+        renderFilters();
+        render();
+      })
+      .catch(() => {});
+  }
   state.anchor = todayInZone();
   $("login").hidden = true;
   $("app").hidden = false;
@@ -162,10 +191,18 @@ let loading = 0;
 /** Fetches the week being shown; the other view of the same week needs no new request. */
 async function load() {
   const week = sundayOf(state.anchor);
+  const path = `/api/events?start=${week}&end=${addDays(week, 7)}`;
   loading++;
   $("refresh").classList.add("spinning");
+  if (!state.weeks.has(week)) {
+    const saved = await cachedApi(path);
+    if (saved && !state.weeks.has(week)) {
+      state.weeks.set(week, saved);
+      if (sundayOf(state.anchor) === week) render();
+    }
+  }
   try {
-    const data = await api(`/api/events?start=${week}&end=${addDays(week, 7)}`);
+    const data = await api(path);
     state.weeks.set(week, data);
     if (sundayOf(state.anchor) === week) render();
   } catch (error) {
@@ -278,7 +315,10 @@ function renderFilters() {
 }
 
 function renderNotices(messages) {
-  $("notices").replaceChildren(...messages.map((m) => el("div", { className: "notice" }, m)));
+  $("notices").replaceChildren(...messages.map((m) =>
+    typeof m === "string"
+      ? el("div", { className: "notice" }, m)
+      : el("div", { className: "notice" + (m.info ? " info" : "") }, m.text)));
 }
 
 function renderRange() {
@@ -376,8 +416,11 @@ function render() {
         for (const piece of pieces(event)) timed.get(piece.day)?.push(piece);
       }
     }
-    const notices = data.errors.map((e) =>
-      (e.person ? `${personById(e.person).name}: ` : "") + e.message + (e.stale ? " (מוצגת הגרסה האחרונה שנטענה)" : ""));
+    const notices = data.fromCache
+      ? [{ info: true, text: `מתעדכן… בינתיים מוצג המצב מ-${timeOf(data.generatedAt)}` }]
+      : [];
+    notices.push(...data.errors.map((e) =>
+      (e.person ? `${personById(e.person).name}: ` : "") + e.message + (e.stale ? " (מוצגת הגרסה האחרונה שנטענה)" : "")));
     // Not only inside the form: an event that vanishes later is the first sign of this.
     if (state.storage === "temporary") {
       notices.unshift("⚠️ אין חיבור ל-Neon: אירועים שמוסיפים נשמרים זמנית ויימחקו. צריך להגדיר DATABASE_URL ב-Render.");
@@ -668,6 +711,7 @@ $("editor-form").addEventListener("submit", async (e) => {
   }
   const save = $("editor-form").querySelector("[type=submit]");
   save.disabled = true;
+  const waking = setTimeout(() => ($("ed-error").textContent = "שומר… השרת מתעורר, זה יכול לקחת עד חצי דקה"), 2500);
   try {
     const saved = await api(editing ? `/api/events/${editing.id}` : "/api/events", {
       method: editing ? "PUT" : "POST",
@@ -690,6 +734,7 @@ $("editor-form").addEventListener("submit", async (e) => {
   } catch (error) {
     if (error.message !== "unauthenticated") $("ed-error").textContent = error.message;
   } finally {
+    clearTimeout(waking);
     save.disabled = false;
   }
 });
@@ -750,6 +795,12 @@ for (const button of document.querySelectorAll(".tabbar button")) {
 }
 
 async function loadSchool() {
+  const saved = await cachedApi("/api/school");
+  if (saved && !school.loaded) {
+    school.kids = saved.kids;
+    school.loaded = true;
+    renderSchool(true);
+  }
   try {
     school.kids = (await api("/api/school")).kids;
     school.loaded = true;
@@ -762,8 +813,16 @@ async function loadSchool() {
 }
 
 async function loadNotes(week) {
+  const path = `/api/school/notes?start=${week}&end=${addDays(week, 7)}`;
+  if (!school.notes.has(week)) {
+    const saved = await cachedApi(path);
+    if (saved && !school.notes.has(week)) {
+      school.notes.set(week, saved);
+      if (!$("school-tab").hidden && sundayOf(school.date) === week) renderSchool();
+    }
+  }
   try {
-    const data = await api(`/api/school/notes?start=${week}&end=${addDays(week, 7)}`);
+    const data = await api(path);
     school.notes.set(week, data);
   } catch (error) {
     if (error.message === "unauthenticated") return;
@@ -1030,6 +1089,7 @@ $("note-form").addEventListener("submit", async (e) => {
   }
   const save = $("note-form").querySelector("[type=submit]");
   save.disabled = true;
+  const waking = setTimeout(() => ($("nt-error").textContent = "שומר… השרת מתעורר, זה יכול לקחת עד חצי דקה"), 2500);
   try {
     const saved = await api(editingNote ? `/api/school/notes/${editingNote.id}` : "/api/school/notes", {
       method: editingNote ? "PUT" : "POST",
@@ -1047,6 +1107,7 @@ $("note-form").addEventListener("submit", async (e) => {
   } catch (error) {
     if (error.message !== "unauthenticated") $("nt-error").textContent = error.message;
   } finally {
+    clearTimeout(waking);
     save.disabled = false;
   }
 });
@@ -1070,6 +1131,16 @@ closeOnOutsideTap($("note-editor"));
 (async function boot() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+  // Signed in before on this phone: open at once with the last data, and let
+  // the server confirm the session when it wakes (a 401 brings the login back).
+  const saved = await cachedApi("/api/people");
+  if (saved) {
+    api("/api/session")
+      .then((session) => !session.authenticated && showLogin())
+      .catch(() => {});
+    await start(saved);
+    return;
   }
   try {
     const session = await api("/api/session");

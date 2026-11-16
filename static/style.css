@@ -520,3 +520,4 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @media (prefers-color-scheme: dark) {
   .note-row { background: #422006; border-color: #a16207; color: #fde68a; }
 }
+.notice.info { background: var(--today); color: var(--text); }
