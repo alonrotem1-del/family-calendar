@@ -315,7 +315,7 @@ def create_app(
     def storage_kind() -> str:
         return "temporary" if not store.durable else "unavailable" if store.error else "durable"
 
-    @app.get("/api/health")
+    @app.api_route("/api/health", methods=["GET", "HEAD"])  # HEAD: some uptime pingers use it
     def health(db: bool = False):
         """Public, and says nothing private: which version runs and whether saving works.
         /api/health?db=1 also tries the database (left out of Render's frequent checks,

@@ -681,3 +681,9 @@ def test_page_names_its_files_by_content(family_file):
     (style,) = re.findall(r'href="/style.css\?v=([0-9a-f]{12})"', page)
     assert script == style
     assert make_client(family_file).get(f"/app.js?v={script}").status_code == 200
+
+
+def test_uptime_pingers_get_a_200(family_file):
+    client = make_client(family_file)
+    assert client.head("/api/health").status_code == 200
+    assert client.get("/api/health").status_code == 200
