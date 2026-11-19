@@ -93,12 +93,29 @@ function visibleDays() {
 
 // ---- Server ---------------------------------------------------------------
 
+/** An answer without our mark is Render's "waking up" page, not the app's. */
+class Waking extends Error {
+  constructor() {
+    super("השרת מתעורר… זה לוקח עד חצי דקה");
+    this.waking = true;
+  }
+}
+
+// Tries again every few seconds while the server wakes, for up to two minutes.
+const wakeRetries = new Map();
+function retryWhileWaking(key, fn) {
+  const tries = (wakeRetries.get(key) || 0) + 1;
+  wakeRetries.set(key, tries);
+  if (tries <= 30) setTimeout(fn, 4000);
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     ...options,
   });
+  if (!response.headers.get("X-Family-Calendar")) throw new Waking();
   if (response.status === 401 && path !== "/api/login") {
     showLogin();
     throw new Error("unauthenticated");
@@ -205,8 +222,15 @@ async function load() {
     const data = await api(path);
     state.weeks.set(week, data);
     if (sundayOf(state.anchor) === week) render();
+    wakeRetries.delete("events");
   } catch (error) {
     if (error.message === "unauthenticated") return;
+    if (error.waking) {
+      // Keep showing the saved week, if there is one, and try again shortly.
+      if (!state.weeks.has(week)) renderNotices([{ info: true, text: error.message }]);
+      retryWhileWaking("events", load);
+      return;
+    }
     renderNotices([navigator.onLine ? error.message : "אין חיבור לאינטרנט"]);
   } finally {
     if (--loading === 0) $("refresh").classList.remove("spinning");
@@ -806,7 +830,10 @@ async function loadSchool() {
     school.loaded = true;
     renderSchool(true);
   } catch (error) {
-    if (error.message !== "unauthenticated") {
+    if (error.waking) {
+      if (!school.loaded) $("school-body").replaceChildren(el("div", { className: "school-empty" }, error.message));
+      retryWhileWaking("school", loadSchool);
+    } else if (error.message !== "unauthenticated") {
       $("school-body").replaceChildren(el("div", { className: "school-empty" }, error.message));
     }
   }
@@ -826,6 +853,10 @@ async function loadNotes(week) {
     school.notes.set(week, data);
   } catch (error) {
     if (error.message === "unauthenticated") return;
+    if (error.waking) {
+      retryWhileWaking("notes", () => loadNotes(week)); // the saved notes, if any, stay on screen
+      return;
+    }
     school.notes.set(week, { notes: [], error: navigator.onLine ? error.message : "אין חיבור לאינטרנט" });
   }
   if (!$("school-tab").hidden && sundayOf(school.date) === week) renderSchool();
@@ -1142,12 +1173,22 @@ closeOnOutsideTap($("note-editor"));
     await start(saved);
     return;
   }
+  await firstOpen();
+})();
+
+/** Opening on a phone with nothing saved yet: the server has to answer first. */
+async function firstOpen() {
   try {
     const session = await api("/api/session");
     if (!session.configured) showLogin("לא הוגדרה סיסמה לאפליקציה (FAMILY_PASSWORD)");
     else if (!session.authenticated) showLogin();
     else await start();
   } catch (error) {
-    if (error.message !== "unauthenticated") showLogin(navigator.onLine ? error.message : "אין חיבור לאינטרנט");
+    if (error.waking) {
+      showLogin(error.message);
+      retryWhileWaking("boot", firstOpen);
+    } else if (error.message !== "unauthenticated") {
+      showLogin(navigator.onLine ? error.message : "אין חיבור לאינטרנט");
+    }
   }
-})();
+}

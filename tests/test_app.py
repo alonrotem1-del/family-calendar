@@ -689,3 +689,11 @@ def test_uptime_pingers_get_a_200(family_file):
     client = make_client(family_file)
     assert client.head("/api/health").status_code == 200
     assert client.get("/api/health").status_code == 200
+
+
+def test_every_answer_carries_our_mark(family_file):
+    # The service worker tells our answers from Render's "waking up" page by it.
+    client = make_client(family_file)
+    for path in ("/", "/app.js", "/api/health", "/api/session"):
+        assert client.get(path).headers["x-family-calendar"] == "1", path
+    assert client.get("/api/people").headers["x-family-calendar"] == "1"  # a 401 too

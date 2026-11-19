@@ -153,6 +153,9 @@ def create_app(
         response = await call_next(request)
         api = request.url.path.startswith("/api/")
         response.headers.setdefault("Cache-Control", "no-store" if api else "no-cache")
+        # Our mark: while the server sleeps, Render answers with its own
+        # "waking up" page, which the app must neither show nor save.
+        response.headers["X-Family-Calendar"] = "1"
         return response
 
     def is_signed_in(request: Request) -> bool:
