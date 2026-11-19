@@ -455,7 +455,9 @@ def test_saving_recovers_once_the_database_is_back(tmp_path):
 def test_health_is_public_and_says_nothing_private(family_file):
     client = make_client(family_file)
     body = client.get("/api/health").json()
+    up_since = body.pop("upSince")
     assert body == {"ok": True, "version": "local", "storage": "temporary", "sameDatabase": None}
+    assert up_since.endswith("+00:00")
     assert client.get("/api/health?db=1").status_code == 200
 
 

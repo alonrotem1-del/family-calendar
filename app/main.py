@@ -135,6 +135,8 @@ def create_app(
     store: EventStore | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
+    # When this server last started: on Render's free plan, when it last woke up.
+    started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     store = store or EventStore(settings.database_url, direct_url=settings.database_url_unpooled)
     cache = FeedCache(fetch=fetch, ttl=settings.cache_seconds)
     session_token = hmac.new(
@@ -330,6 +332,7 @@ def create_app(
             "version": (os.environ.get("RENDER_GIT_COMMIT") or "local")[:7],
             "storage": storage_kind(),
             "sameDatabase": same_database(settings.database_url, settings.database_url_unpooled),
+            "upSince": started,
         }
 
     # The page names its script and style by content ("/app.js?v=3f2a…"), so a
